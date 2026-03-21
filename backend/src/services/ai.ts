@@ -35,7 +35,7 @@ Only output valid JSON, no markdown fencing or extra text.`;
       { role: 'user', content: `Extract tasks from this document:\n\n${content.slice(0, 15000)}` },
     ],
     temperature: 0.1,
-    max_tokens: 4000,
+    max_completion_tokens: 4000,
     response_format: { type: 'json_object' },
   });
 
@@ -61,7 +61,7 @@ export async function chatCompletion(
     model: getDeploymentName(),
     messages,
     temperature: 0.7,
-    max_tokens: 2000,
+    max_completion_tokens: 2000,
   });
 
   return response.choices[0]?.message?.content ?? 'I was unable to generate a response.';
@@ -97,7 +97,7 @@ Rules:
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,
-    max_tokens: 8000,
+    max_completion_tokens: 8000,
     response_format: { type: 'json_object' },
   });
 
