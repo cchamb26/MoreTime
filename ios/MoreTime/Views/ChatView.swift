@@ -41,7 +41,7 @@ struct ChatView: View {
 
                             if chatStore.isLoading {
                                 HStack {
-                                    TypingIndicator()
+                                    ResponseEstimator()
                                     Spacer()
                                 }
                                 .padding(.horizontal)
@@ -110,11 +110,16 @@ struct ChatView: View {
             if chatStore.lastActionType == "task_created" {
                 await taskStore.fetchTasks()
                 if chatStore.didGenerateSchedule {
-                    let now = Date()
-                    let cal = Calendar.current
-                    let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
-                    let end = cal.date(byAdding: .month, value: 1, to: start)!
-                    await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                    // Schedule generates in the background on the server;
+                    // poll after a delay so it has time to finish
+                    Task.detached {
+                        try? await Task.sleep(for: .seconds(10))
+                        let now = Date()
+                        let cal = Calendar.current
+                        let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
+                        let end = cal.date(byAdding: .month, value: 1, to: start)!
+                        await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                    }
                 }
             }
         }
@@ -157,11 +162,14 @@ struct SuggestionChip: View {
                 if chatStore.lastActionType == "task_created" {
                     await taskStore.fetchTasks()
                     if chatStore.didGenerateSchedule {
-                        let now = Date()
-                        let cal = Calendar.current
-                        let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
-                        let end = cal.date(byAdding: .month, value: 1, to: start)!
-                        await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                        Task.detached {
+                            try? await Task.sleep(for: .seconds(10))
+                            let now = Date()
+                            let cal = Calendar.current
+                            let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
+                            let end = cal.date(byAdding: .month, value: 1, to: start)!
+                            await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                        }
                     }
                 }
             }
@@ -176,25 +184,108 @@ struct SuggestionChip: View {
     }
 }
 
-struct TypingIndicator: View {
-    @State private var phase = 0.0
+struct ResponseEstimator: View {
+    @State private var elapsed: TimeInterval = 0
+    @State private var shimmerPhase: CGFloat = -1
+
+    private let estimatedSeconds: TimeInterval = 12
+    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+    private var progress: Double {
+        // Asymptotic curve: approaches 1 but never reaches it
+        1 - exp(-elapsed / estimatedSeconds * 1.8)
+    }
+
+    private var statusText: String {
+        switch elapsed {
+        case ..<3:    return "Thinking..."
+        case ..<8:    return "Analyzing your request..."
+        case ..<15:   return "Crafting a response..."
+        case ..<25:   return "Almost there..."
+        default:      return "Still working on it..."
+        }
+    }
+
+    private var timeText: String {
+        let remaining = max(1, Int(ceil(estimatedSeconds - elapsed)))
+        if elapsed >= estimatedSeconds {
+            return "any moment now"
+        }
+        return "~\(remaining)s remaining"
+    }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3) { i in
-                Circle()
-                    .fill(.secondary)
-                    .frame(width: 6, height: 6)
-                    .offset(y: sin(phase + Double(i) * 0.8) * 3)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                // Animated dots
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(.secondary)
+                            .frame(width: 5, height: 5)
+                            .opacity(dotOpacity(for: i))
+                    }
+                }
+
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
             }
+
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.gray.opacity(0.15))
+
+                    Capsule()
+                        .fill(.primary.opacity(0.5))
+                        .frame(width: geo.size.width * progress)
+
+                    // Shimmer
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, .white.opacity(0.3), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * 0.3)
+                        .offset(x: geo.size.width * shimmerPhase)
+                        .mask(
+                            Capsule()
+                                .frame(width: geo.size.width * progress)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        )
+                }
+            }
+            .frame(height: 4)
+
+            Text(timeText)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .contentTransition(.numericText())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
-        .onAppear {
-            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-                phase = .pi * 2
+        .background(.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        .onReceive(timer) { _ in
+            withAnimation(.easeOut(duration: 0.3)) {
+                elapsed += 0.1
             }
         }
+        .onAppear {
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                shimmerPhase = 1.2
+            }
+        }
+    }
+
+    private func dotOpacity(for index: Int) -> Double {
+        let cycle = elapsed.truncatingRemainder(dividingBy: 1.2)
+        let start = Double(index) * 0.3
+        return (cycle >= start && cycle < start + 0.4) ? 1.0 : 0.35
     }
 }

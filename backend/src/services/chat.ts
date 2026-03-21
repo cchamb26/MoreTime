@@ -187,13 +187,12 @@ export async function handleChatMessage(
 
         action = { type, data: task };
 
-        // Auto-generate schedule so the new task appears on the calendar
-        try {
-          await generateSchedule(userId);
-          scheduleGenerated = true;
-        } catch (schedErr) {
-          console.error('Auto-schedule after chat task creation failed:', schedErr);
-        }
+        // Fire-and-forget: regenerate schedule in the background
+        // so the chat response returns immediately
+        generateSchedule(userId)
+          .then(() => { console.log('Auto-schedule after chat task creation succeeded'); })
+          .catch((err) => { console.error('Auto-schedule after chat task creation failed:', err); });
+        scheduleGenerated = true;
       } else {
         action = { type, data };
       }

@@ -23,6 +23,13 @@ final class APIClient {
 
     var baseURL = "https://moretime-gdbwhjgfdxeyhtfw.canadacentral-01.azurewebsites.net"
 
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForResource = 180
+        return URLSession(configuration: config)
+    }()
+
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .useDefaultKeys
@@ -96,7 +103,7 @@ final class APIClient {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw APIError.networkError(error)
         }
@@ -172,7 +179,7 @@ final class APIClient {
 
         request.httpBody = body
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode < 400 else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             throw APIError.serverError(code, "Upload failed")
