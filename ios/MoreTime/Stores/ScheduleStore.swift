@@ -78,6 +78,19 @@ final class ScheduleStore {
         }
     }
 
+    func clearAllBlocks() async -> Int {
+        do {
+            struct ClearResponse: Decodable { let removed: Int }
+            let result: ClearResponse = try await api.request("DELETE", path: "/schedule/clear")
+            blocks.removeAll { !$0.isLocked }
+            return result.removed
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "clearAllBlocks")
+            return 0
+        }
+    }
+
     // MARK: - Helpers
 
     func blocksForDate(_ date: Date) -> [ScheduleBlock] {

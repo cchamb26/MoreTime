@@ -4,6 +4,7 @@ struct CalendarView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
     @State private var selectedDate = Date()
     @State private var showGenerateSheet = false
+    @State private var showClearConfirm = false
 
     private let calendar = Calendar.current
 
@@ -108,6 +109,20 @@ struct CalendarView: View {
                         withAnimation { selectedDate = Date() }
                     }
                 }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Clear Schedule", role: .destructive) {
+                        showClearConfirm = true
+                    }
+                    .disabled(scheduleStore.blocks.filter { !$0.isLocked }.isEmpty)
+                }
+            }
+            .alert("Clear Schedule", isPresented: $showClearConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    Task { await scheduleStore.clearAllBlocks() }
+                }
+            } message: {
+                Text("This will remove all generated schedule blocks. Locked blocks (classes, work, etc.) will be kept. This cannot be undone.")
             }
             .sheet(isPresented: $showGenerateSheet) {
                 ScheduleGenerateView()

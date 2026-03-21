@@ -142,6 +142,23 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
   }
 });
 
+router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+
+    const { count, error } = await supabase
+      .from('schedule_blocks')
+      .delete({ count: 'exact' })
+      .eq('user_id', req.user!.userId)
+      .eq('is_locked', false);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await generateSchedule(req.user!.userId);
