@@ -1,13 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { prisma } from '../utils/db.js';
-import { getEnv } from '../utils/env.js';
+import { getSupabase } from '../utils/supabase.js';
 import { validate } from '../middleware/validate.js';
-import { authGuard, AuthPayload } from '../middleware/auth.js';
+import { authGuard } from '../middleware/auth.js';
 import { ConflictError, UnauthorizedError } from '../utils/errors.js';
-import crypto from 'node:crypto';
+import { toCamel } from '../utils/transform.js';
 
 const router = Router();
 
@@ -27,43 +24,56 @@ const refreshSchema = z.object({
   refreshToken: z.string(),
 });
 
-function generateTokens(payload: AuthPayload) {
-  const env = getEnv();
-  const accessToken = jwt.sign(payload, env.JWT_SECRET, { expiresIn: '15m' });
-  const refreshToken = crypto.randomBytes(48).toString('hex');
-  return { accessToken, refreshToken };
-}
-
 router.post(
   '/register',
   validate(registerSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, name, password, timezone } = req.body;
+      const supabase = getSupabase();
 
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
-        throw new ConflictError('Email already registered');
+      // Create user via Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name, timezone: timezone ?? 'America/New_York' },
+      });
+
+      if (authError) {
+        if (authError.message.includes('already')) throw new ConflictError('Email already registered');
+        throw authError;
       }
 
-      const passwordHash = await bcrypt.hash(password, 12);
-      const user = await prisma.user.create({
-        data: { email, name, passwordHash, timezone: timezone ?? 'America/New_York' },
-        select: { id: true, email: true, name: true, timezone: true, createdAt: true },
+      // Create profile row
+      await supabase.from('profiles').insert({
+        id: authData.user.id,
+        email,
+        name,
+        timezone: timezone ?? 'America/New_York',
       });
 
-      const payload: AuthPayload = { userId: user.id, email: user.email };
-      const { accessToken, refreshToken } = generateTokens(payload);
-
-      await prisma.refreshToken.create({
-        data: {
-          token: refreshToken,
-          userId: user.id,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        },
+      // Sign in to get session tokens
+      const { data: session, error: loginError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
+      if (loginError) throw loginError;
 
-      res.status(201).json({ user, accessToken, refreshToken });
+      const user = {
+        id: authData.user.id,
+        email,
+        name,
+        timezone: timezone ?? 'America/New_York',
+        preferences: {},
+        createdAt: authData.user.created_at,
+      };
+
+      res.status(201).json({
+        user,
+        accessToken: session.session!.access_token,
+        refreshToken: session.session!.refresh_token,
+      });
     } catch (err) {
       next(err);
     }
@@ -76,28 +86,27 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password } = req.body;
+      const supabase = getSupabase();
 
-      const user = await prisma.user.findUnique({ where: { email } });
-      if (!user) throw new UnauthorizedError('Invalid credentials');
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw new UnauthorizedError('Invalid credentials');
 
-      const valid = await bcrypt.compare(password, user.passwordHash);
-      if (!valid) throw new UnauthorizedError('Invalid credentials');
-
-      const payload: AuthPayload = { userId: user.id, email: user.email };
-      const { accessToken, refreshToken } = generateTokens(payload);
-
-      await prisma.refreshToken.create({
-        data: {
-          token: refreshToken,
-          userId: user.id,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
-      });
+      // Fetch profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user!.id)
+        .single();
 
       res.json({
-        user: { id: user.id, email: user.email, name: user.name, timezone: user.timezone },
-        accessToken,
-        refreshToken,
+        user: profile ? toCamel(profile) : {
+          id: data.user!.id,
+          email: data.user!.email,
+          name: data.user!.user_metadata?.name ?? '',
+          timezone: data.user!.user_metadata?.timezone ?? 'America/New_York',
+        },
+        accessToken: data.session!.access_token,
+        refreshToken: data.session!.refresh_token,
       });
     } catch (err) {
       next(err);
@@ -111,32 +120,15 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { refreshToken: token } = req.body;
+      const supabase = getSupabase();
 
-      const stored = await prisma.refreshToken.findUnique({
-        where: { token },
-        include: { user: true },
+      const { data, error } = await supabase.auth.refreshSession({ refresh_token: token });
+      if (error || !data.session) throw new UnauthorizedError('Invalid or expired refresh token');
+
+      res.json({
+        accessToken: data.session.access_token,
+        refreshToken: data.session.refresh_token,
       });
-
-      if (!stored || stored.expiresAt < new Date()) {
-        if (stored) await prisma.refreshToken.delete({ where: { id: stored.id } });
-        throw new UnauthorizedError('Invalid or expired refresh token');
-      }
-
-      // Rotate refresh token
-      await prisma.refreshToken.delete({ where: { id: stored.id } });
-
-      const payload: AuthPayload = { userId: stored.user.id, email: stored.user.email };
-      const { accessToken, refreshToken } = generateTokens(payload);
-
-      await prisma.refreshToken.create({
-        data: {
-          token: refreshToken,
-          userId: stored.user.id,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
-      });
-
-      res.json({ accessToken, refreshToken });
     } catch (err) {
       next(err);
     }
@@ -145,8 +137,8 @@ router.post(
 
 router.post('/logout', authGuard, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Delete all refresh tokens for this user
-    await prisma.refreshToken.deleteMany({ where: { userId: req.user!.userId } });
+    const supabase = getSupabase();
+    await supabase.auth.admin.signOut(req.user!.userId);
     res.json({ message: 'Logged out successfully' });
   } catch (err) {
     next(err);
@@ -155,11 +147,15 @@ router.post('/logout', authGuard, async (req: Request, res: Response, next: Next
 
 router.get('/me', authGuard, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.userId },
-      select: { id: true, email: true, name: true, preferences: true, timezone: true, createdAt: true },
-    });
-    res.json(user);
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, name, timezone, preferences, created_at')
+      .eq('id', req.user!.userId)
+      .single();
+
+    if (error || !data) throw new UnauthorizedError('Profile not found');
+    res.json(toCamel(data));
   } catch (err) {
     next(err);
   }
@@ -177,12 +173,21 @@ router.patch(
   validate(updateProfileSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const user = await prisma.user.update({
-        where: { id: req.user!.userId },
-        data: req.body,
-        select: { id: true, email: true, name: true, preferences: true, timezone: true },
-      });
-      res.json(user);
+      const supabase = getSupabase();
+      const updates: Record<string, unknown> = {};
+      if (req.body.name !== undefined) updates.name = req.body.name;
+      if (req.body.timezone !== undefined) updates.timezone = req.body.timezone;
+      if (req.body.preferences !== undefined) updates.preferences = req.body.preferences;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', req.user!.userId)
+        .select('id, email, name, timezone, preferences')
+        .single();
+
+      if (error) throw error;
+      res.json(toCamel(data));
     } catch (err) {
       next(err);
     }

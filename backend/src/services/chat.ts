@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { prisma } from '../utils/db.js';
+import { getSupabase } from '../utils/supabase.js';
 import { chatCompletion } from './ai.js';
 
 interface ChatResult {
@@ -12,45 +12,55 @@ interface ChatResult {
 }
 
 async function buildSystemContext(userId: string): Promise<string> {
+  const supabase = getSupabase();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const todayStr = today.toISOString().slice(0, 10);
+  const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().slice(0, 10);
 
-  const [tasks, todayBlocks, user] = await Promise.all([
-    prisma.task.findMany({
-      where: { userId, status: { not: 'completed' } },
-      include: { course: { select: { name: true } } },
-      orderBy: { dueDate: 'asc' },
-      take: 30,
-    }),
-    prisma.scheduleBlock.findMany({
-      where: {
-        userId,
-        date: { gte: today, lt: tomorrow },
-      },
-      include: { task: { select: { title: true } } },
-      orderBy: { startTime: 'asc' },
-    }),
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true, timezone: true },
-    }),
+  const [tasksResult, blocksResult, userResult] = await Promise.all([
+    supabase
+      .from('tasks')
+      .select('*, courses:course_id(name)')
+      .eq('user_id', userId)
+      .neq('status', 'completed')
+      .order('due_date')
+      .limit(30),
+    supabase
+      .from('schedule_blocks')
+      .select('*, tasks:task_id(title)')
+      .eq('user_id', userId)
+      .gte('date', todayStr)
+      .lt('date', tomorrowStr)
+      .order('start_time'),
+    supabase
+      .from('profiles')
+      .select('name, timezone')
+      .eq('id', userId)
+      .single(),
   ]);
 
+  const tasks = tasksResult.data ?? [];
+  const todayBlocks = blocksResult.data ?? [];
+  const user = userResult.data;
+
   const taskList = tasks
-    .map((t) => {
-      const due = t.dueDate ? t.dueDate.toISOString().slice(0, 10) : 'No deadline';
-      return `- ${t.title} (${t.course?.name ?? 'General'}) — Due: ${due}, Priority: ${t.priority}, Est: ${t.estimatedHours}h, Status: ${t.status}`;
+    .map((t: Record<string, unknown>) => {
+      const due = t.due_date ? (t.due_date as string).slice(0, 10) : 'No deadline';
+      const courseName = (t.courses as Record<string, unknown> | null)?.name ?? 'General';
+      return `- ${t.title} (${courseName}) — Due: ${due}, Priority: ${t.priority}, Est: ${t.estimated_hours}h, Status: ${t.status}`;
     })
     .join('\n');
 
   const scheduleList = todayBlocks
-    .map((b) => `- ${b.startTime}-${b.endTime}: ${b.task?.title ?? b.label ?? 'Block'}${b.isLocked ? ' [LOCKED]' : ''}`)
+    .map((b: Record<string, unknown>) => {
+      const taskTitle = (b.tasks as Record<string, unknown> | null)?.title ?? b.label ?? 'Block';
+      return `- ${b.start_time}-${b.end_time}: ${taskTitle}${b.is_locked ? ' [LOCKED]' : ''}`;
+    })
     .join('\n');
 
   return `You are MoreTime, an AI study assistant helping ${user?.name ?? 'a student'} manage their academic schedule.
-Today is ${today.toISOString().slice(0, 10)} (${user?.timezone ?? 'America/New_York'}).
+Today is ${todayStr} (${user?.timezone ?? 'America/New_York'}).
 
 Current tasks:
 ${taskList || '(No pending tasks)'}
@@ -76,35 +86,44 @@ export async function handleChatMessage(
   message: string,
   sessionId?: string,
 ): Promise<ChatResult> {
+  const supabase = getSupabase();
   const sid = sessionId || crypto.randomUUID();
 
   // Save user message
-  await prisma.chatMessage.create({
-    data: { userId, role: 'user', content: message, sessionId: sid },
+  await supabase.from('chat_messages').insert({
+    user_id: userId,
+    role: 'user',
+    content: message,
+    session_id: sid,
   });
 
   // Get conversation history (last 20 messages)
-  const history = await prisma.chatMessage.findMany({
-    where: { userId, sessionId: sid },
-    orderBy: { timestamp: 'asc' },
-    take: 20,
-  });
+  const { data: history } = await supabase
+    .from('chat_messages')
+    .select('role, content')
+    .eq('user_id', userId)
+    .eq('session_id', sid)
+    .order('timestamp')
+    .limit(20);
 
   // Build messages for AI
   const systemContent = await buildSystemContext(userId);
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemContent },
-    ...history.map((m) => ({
+    ...(history ?? []).map((m: Record<string, unknown>) => ({
       role: m.role as 'user' | 'assistant',
-      content: m.content,
+      content: m.content as string,
     })),
   ];
 
   const response = await chatCompletion(messages);
 
   // Save assistant response
-  await prisma.chatMessage.create({
-    data: { userId, role: 'assistant', content: response, sessionId: sid },
+  await supabase.from('chat_messages').insert({
+    user_id: userId,
+    role: 'assistant',
+    content: response,
+    session_id: sid,
   });
 
   // Parse any action from response
@@ -115,19 +134,21 @@ export async function handleChatMessage(
     try {
       const data = JSON.parse(actionMatch[2]);
 
-      // Auto-create task if action type is task_created
       if (type === 'task_created' && data.title) {
-        const task = await prisma.task.create({
-          data: {
-            userId,
+        const { data: task } = await supabase
+          .from('tasks')
+          .insert({
+            user_id: userId,
             title: data.title,
-            courseId: data.courseId || null,
-            dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            estimatedHours: data.estimatedHours || 2,
+            course_id: data.courseId || null,
+            due_date: data.dueDate ? data.dueDate : null,
+            estimated_hours: data.estimatedHours || 2,
             priority: data.priority || 2,
             description: data.description || '',
-          },
-        });
+          })
+          .select()
+          .single();
+
         action = { type, data: task };
       } else {
         action = { type, data };
@@ -137,7 +158,6 @@ export async function handleChatMessage(
     }
   }
 
-  // Clean action tags from response text
   const cleanResponse = response.replace(/<action[^>]*>.*?<\/action>/gs, '').trim();
 
   return { sessionId: sid, response: cleanResponse, action };

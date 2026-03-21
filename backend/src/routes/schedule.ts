@@ -1,9 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { prisma } from '../utils/db.js';
+import { getSupabase } from '../utils/supabase.js';
 import { authGuard } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { NotFoundError } from '../utils/errors.js';
+import { toCamel } from '../utils/transform.js';
 import { generateSchedule } from '../services/scheduling.js';
 
 const router = Router();
@@ -28,22 +29,30 @@ const updateBlockSchema = createBlockSchema.partial();
 router.get('/', validate(querySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { startDate, endDate } = req.query as z.infer<typeof querySchema>;
+    const supabase = getSupabase();
 
-    const blocks = await prisma.scheduleBlock.findMany({
-      where: {
-        userId: req.user!.userId,
-        date: {
-          gte: new Date(startDate),
-          lte: new Date(endDate),
-        },
-      },
-      include: {
-        task: {
-          select: { id: true, title: true, priority: true, course: { select: { id: true, name: true, color: true } } },
-        },
-      },
-      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    const { data, error } = await supabase
+      .from('schedule_blocks')
+      .select('*, tasks:task_id(id, title, priority, courses:course_id(id, name, color))')
+      .eq('user_id', req.user!.userId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date')
+      .order('start_time');
+
+    if (error) throw error;
+
+    const blocks = (data ?? []).map((row: Record<string, unknown>) => {
+      const { tasks, user_id, ...rest } = row as Record<string, unknown>;
+      const taskData = tasks as Record<string, unknown> | null;
+      let task = null;
+      if (taskData) {
+        const { courses, ...taskRest } = taskData;
+        task = { ...toCamel(taskRest), course: courses ? toCamel(courses) : null };
+      }
+      return { ...toCamel(rest), task };
     });
+
     res.json(blocks);
   } catch (err) {
     next(err);
@@ -55,17 +64,26 @@ router.post(
   validate(createBlockSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = {
-        ...req.body,
-        userId: req.user!.userId,
-        date: new Date(req.body.date),
-      };
+      const supabase = getSupabase();
 
-      const block = await prisma.scheduleBlock.create({
-        data,
-        include: { task: { select: { id: true, title: true } } },
-      });
-      res.status(201).json(block);
+      const { data, error } = await supabase
+        .from('schedule_blocks')
+        .insert({
+          user_id: req.user!.userId,
+          task_id: req.body.taskId ?? null,
+          date: req.body.date,
+          start_time: req.body.startTime,
+          end_time: req.body.endTime,
+          is_locked: req.body.isLocked ?? false,
+          label: req.body.label ?? null,
+        })
+        .select('*, tasks:task_id(id, title)')
+        .single();
+
+      if (error) throw error;
+
+      const { tasks, user_id, ...rest } = data as Record<string, unknown>;
+      res.status(201).json({ ...toCamel(rest), task: tasks ? toCamel(tasks) : null });
     } catch (err) {
       next(err);
     }
@@ -78,20 +96,28 @@ router.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const existing = await prisma.scheduleBlock.findFirst({
-        where: { id, userId: req.user!.userId },
-      });
-      if (!existing) throw new NotFoundError('ScheduleBlock', id);
+      const supabase = getSupabase();
 
-      const data = { ...req.body };
-      if (data.date) data.date = new Date(data.date);
+      const updates: Record<string, unknown> = {};
+      if (req.body.taskId !== undefined) updates.task_id = req.body.taskId;
+      if (req.body.date !== undefined) updates.date = req.body.date;
+      if (req.body.startTime !== undefined) updates.start_time = req.body.startTime;
+      if (req.body.endTime !== undefined) updates.end_time = req.body.endTime;
+      if (req.body.isLocked !== undefined) updates.is_locked = req.body.isLocked;
+      if (req.body.label !== undefined) updates.label = req.body.label;
 
-      const block = await prisma.scheduleBlock.update({
-        where: { id },
-        data,
-        include: { task: { select: { id: true, title: true } } },
-      });
-      res.json(block);
+      const { data, error } = await supabase
+        .from('schedule_blocks')
+        .update(updates)
+        .eq('id', id)
+        .eq('user_id', req.user!.userId)
+        .select('*, tasks:task_id(id, title)')
+        .single();
+
+      if (error) throw new NotFoundError('ScheduleBlock', id);
+
+      const { tasks, user_id, ...rest } = data as Record<string, unknown>;
+      res.json({ ...toCamel(rest), task: tasks ? toCamel(tasks) : null });
     } catch (err) {
       next(err);
     }
@@ -101,12 +127,15 @@ router.patch(
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const existing = await prisma.scheduleBlock.findFirst({
-      where: { id, userId: req.user!.userId },
-    });
-    if (!existing) throw new NotFoundError('ScheduleBlock', id);
+    const supabase = getSupabase();
 
-    await prisma.scheduleBlock.delete({ where: { id } });
+    const { error } = await supabase
+      .from('schedule_blocks')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user!.userId);
+
+    if (error) throw new NotFoundError('ScheduleBlock', id);
     res.status(204).end();
   } catch (err) {
     next(err);

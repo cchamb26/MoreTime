@@ -2,11 +2,12 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { prisma } from '../utils/db.js';
+import { getSupabase } from '../utils/supabase.js';
 import { authGuard } from '../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { parseFile } from '../services/fileParser.js';
 import { extractTasksFromContent } from '../services/ai.js';
+import { toCamel } from '../utils/transform.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -23,7 +24,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [
       'application/pdf',
@@ -50,24 +51,28 @@ router.post('/upload', upload.array('files', 10), async (req: Request, res: Resp
     if (!files?.length) throw new ValidationError('No files uploaded');
 
     const courseId = req.body.courseId || null;
+    const supabase = getSupabase();
     const uploads = [];
 
     for (const file of files) {
-      const record = await prisma.fileUpload.create({
-        data: {
-          userId: req.user!.userId,
-          courseId,
-          originalName: file.originalname,
-          storagePath: file.path,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          parseStatus: 'pending',
-        },
-      });
-      uploads.push(record);
+      const { data, error } = await supabase
+        .from('file_uploads')
+        .insert({
+          user_id: req.user!.userId,
+          course_id: courseId,
+          original_name: file.originalname,
+          storage_path: file.path,
+          mime_type: file.mimetype,
+          file_size: file.size,
+          parse_status: 'pending',
+        })
+        .select()
+        .single();
 
-      // Parse asynchronously
-      parseFileInBackground(record.id, file.path, file.mimetype);
+      if (error) throw error;
+      uploads.push(toCamel(data));
+
+      parseFileInBackground(data.id, file.path, file.mimetype);
     }
 
     res.status(201).json(uploads);
@@ -77,39 +82,46 @@ router.post('/upload', upload.array('files', 10), async (req: Request, res: Resp
 });
 
 async function parseFileInBackground(fileId: string, filePath: string, mimeType: string) {
+  const supabase = getSupabase();
   try {
-    await prisma.fileUpload.update({
-      where: { id: fileId },
-      data: { parseStatus: 'parsing' },
-    });
+    await supabase
+      .from('file_uploads')
+      .update({ parse_status: 'parsing' })
+      .eq('id', fileId);
 
     const content = await parseFile(filePath, mimeType);
 
-    await prisma.fileUpload.update({
-      where: { id: fileId },
-      data: {
-        parsedContent: content,
-        parseStatus: 'completed',
-        parsedAt: new Date(),
-      },
-    });
+    await supabase
+      .from('file_uploads')
+      .update({
+        parsed_content: content,
+        parse_status: 'completed',
+        parsed_at: new Date().toISOString(),
+      })
+      .eq('id', fileId);
   } catch (err) {
     console.error(`Failed to parse file ${fileId}:`, err);
-    await prisma.fileUpload.update({
-      where: { id: fileId },
-      data: { parseStatus: 'failed' },
-    });
+    await supabase
+      .from('file_uploads')
+      .update({ parse_status: 'failed' })
+      .eq('id', fileId);
   }
 }
 
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const file = await prisma.fileUpload.findFirst({
-      where: { id, userId: req.user!.userId },
-    });
-    if (!file) throw new NotFoundError('FileUpload', id);
-    res.json(file);
+    const supabase = getSupabase();
+
+    const { data, error } = await supabase
+      .from('file_uploads')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', req.user!.userId)
+      .single();
+
+    if (error || !data) throw new NotFoundError('FileUpload', id);
+    res.json(toCamel(data));
   } catch (err) {
     next(err);
   }
@@ -117,21 +129,16 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const files = await prisma.fileUpload.findMany({
-      where: { userId: req.user!.userId },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        originalName: true,
-        mimeType: true,
-        fileSize: true,
-        parseStatus: true,
-        parsedAt: true,
-        courseId: true,
-        createdAt: true,
-      },
-    });
-    res.json(files);
+    const supabase = getSupabase();
+
+    const { data, error } = await supabase
+      .from('file_uploads')
+      .select('id, original_name, mime_type, file_size, parse_status, parsed_at, course_id, created_at')
+      .eq('user_id', req.user!.userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json((data ?? []).map((f: unknown) => toCamel(f)));
   } catch (err) {
     next(err);
   }
@@ -140,30 +147,40 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.post('/:id/extract-tasks', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const file = await prisma.fileUpload.findFirst({
-      where: { id, userId: req.user!.userId },
-    });
-    if (!file) throw new NotFoundError('FileUpload', id);
-    if (!file.parsedContent) throw new ValidationError('File has not been parsed yet');
+    const supabase = getSupabase();
 
-    const extracted = await extractTasksFromContent(file.parsedContent, file.courseId);
+    const { data: file, error } = await supabase
+      .from('file_uploads')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', req.user!.userId)
+      .single();
 
-    // Create tasks from extracted data
+    if (error || !file) throw new NotFoundError('FileUpload', id);
+    if (!file.parsed_content) throw new ValidationError('File has not been parsed yet');
+
+    const extracted = await extractTasksFromContent(file.parsed_content, file.course_id);
+
     const tasks = [];
     for (const item of extracted) {
-      const task = await prisma.task.create({
-        data: {
-          userId: req.user!.userId,
-          courseId: file.courseId,
+      const { data: task, error: taskError } = await supabase
+        .from('tasks')
+        .insert({
+          user_id: req.user!.userId,
+          course_id: file.course_id,
           title: item.title,
           description: item.description || '',
-          dueDate: item.dueDate ? new Date(item.dueDate) : null,
-          estimatedHours: item.estimatedHours || 2,
+          due_date: item.dueDate ?? null,
+          estimated_hours: item.estimatedHours || 2,
           priority: item.priority || 2,
-        },
-        include: { course: { select: { id: true, name: true, color: true } } },
-      });
-      tasks.push(task);
+        })
+        .select('*, courses:course_id(id, name, color)')
+        .single();
+
+      if (!taskError && task) {
+        const { courses, user_id, ...rest } = task as Record<string, unknown>;
+        tasks.push({ ...toCamel(rest), course: courses ? toCamel(courses) : null });
+      }
     }
 
     res.status(201).json({ extractedCount: tasks.length, tasks });

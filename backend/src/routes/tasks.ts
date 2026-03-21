@@ -1,9 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { prisma } from '../utils/db.js';
+import { getSupabase } from '../utils/supabase.js';
 import { authGuard } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { NotFoundError } from '../utils/errors.js';
+import { toCamel } from '../utils/transform.js';
 
 const router = Router();
 router.use(authGuard);
@@ -33,19 +34,36 @@ const querySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
+const SORT_MAP: Record<string, string> = {
+  dueDate: 'due_date',
+  priority: 'priority',
+  createdAt: 'created_at',
+};
+
 router.get('/', validate(querySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { courseId, status, sortBy = 'dueDate', sortOrder = 'asc' } = req.query as z.infer<typeof querySchema>;
+    const supabase = getSupabase();
 
-    const where: Record<string, unknown> = { userId: req.user!.userId };
-    if (courseId) where.courseId = courseId;
-    if (status) where.status = status;
+    let query = supabase
+      .from('tasks')
+      .select('*, courses:course_id(id, name, color)')
+      .eq('user_id', req.user!.userId);
 
-    const tasks = await prisma.task.findMany({
-      where,
-      include: { course: { select: { id: true, name: true, color: true } } },
-      orderBy: { [sortBy]: sortOrder },
+    if (courseId) query = query.eq('course_id', courseId);
+    if (status) query = query.eq('status', status);
+
+    const column = SORT_MAP[sortBy] ?? 'due_date';
+    query = query.order(column, { ascending: sortOrder !== 'desc', nullsFirst: false });
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const tasks = (data ?? []).map((row: Record<string, unknown>) => {
+      const { courses, user_id, ...rest } = row as Record<string, unknown>;
+      return { ...toCamel(rest), course: courses ? toCamel(courses) : null };
     });
+
     res.json(tasks);
   } catch (err) {
     next(err);
@@ -55,15 +73,29 @@ router.get('/', validate(querySchema, 'query'), async (req: Request, res: Respon
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const task = await prisma.task.findFirst({
-      where: { id, userId: req.user!.userId },
-      include: {
-        course: { select: { id: true, name: true, color: true } },
-        scheduleBlocks: { orderBy: { date: 'asc' } },
-      },
+    const supabase = getSupabase();
+
+    const { data: task, error } = await supabase
+      .from('tasks')
+      .select('*, courses:course_id(id, name, color)')
+      .eq('id', id)
+      .eq('user_id', req.user!.userId)
+      .single();
+
+    if (error || !task) throw new NotFoundError('Task', id);
+
+    const { data: blocks } = await supabase
+      .from('schedule_blocks')
+      .select('*')
+      .eq('task_id', id)
+      .order('date');
+
+    const { courses, user_id, ...rest } = task as Record<string, unknown>;
+    res.json({
+      ...toCamel(rest),
+      course: courses ? toCamel(courses) : null,
+      scheduleBlocks: (blocks ?? []).map((b: unknown) => toCamel(b)),
     });
-    if (!task) throw new NotFoundError('Task', id);
-    res.json(task);
   } catch (err) {
     next(err);
   }
@@ -74,14 +106,27 @@ router.post(
   validate(createTaskSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = { ...req.body, userId: req.user!.userId };
-      if (data.dueDate) data.dueDate = new Date(data.dueDate);
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert({
+          user_id: req.user!.userId,
+          course_id: req.body.courseId ?? null,
+          title: req.body.title,
+          description: req.body.description ?? '',
+          due_date: req.body.dueDate ?? null,
+          priority: req.body.priority ?? 2,
+          estimated_hours: req.body.estimatedHours ?? 1,
+          status: req.body.status ?? 'pending',
+          recurrence: req.body.recurrence ?? null,
+        })
+        .select('*, courses:course_id(id, name, color)')
+        .single();
 
-      const task = await prisma.task.create({
-        data,
-        include: { course: { select: { id: true, name: true, color: true } } },
-      });
-      res.status(201).json(task);
+      if (error) throw error;
+
+      const { courses, user_id, ...rest } = data as Record<string, unknown>;
+      res.status(201).json({ ...toCamel(rest), course: courses ? toCamel(courses) : null });
     } catch (err) {
       next(err);
     }
@@ -94,20 +139,30 @@ router.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const existing = await prisma.task.findFirst({
-        where: { id, userId: req.user!.userId },
-      });
-      if (!existing) throw new NotFoundError('Task', id);
+      const supabase = getSupabase();
 
-      const data = { ...req.body };
-      if (data.dueDate) data.dueDate = new Date(data.dueDate);
+      const updates: Record<string, unknown> = {};
+      if (req.body.title !== undefined) updates.title = req.body.title;
+      if (req.body.description !== undefined) updates.description = req.body.description;
+      if (req.body.dueDate !== undefined) updates.due_date = req.body.dueDate;
+      if (req.body.priority !== undefined) updates.priority = req.body.priority;
+      if (req.body.estimatedHours !== undefined) updates.estimated_hours = req.body.estimatedHours;
+      if (req.body.status !== undefined) updates.status = req.body.status;
+      if (req.body.courseId !== undefined) updates.course_id = req.body.courseId;
+      if (req.body.recurrence !== undefined) updates.recurrence = req.body.recurrence;
 
-      const task = await prisma.task.update({
-        where: { id },
-        data,
-        include: { course: { select: { id: true, name: true, color: true } } },
-      });
-      res.json(task);
+      const { data, error } = await supabase
+        .from('tasks')
+        .update(updates)
+        .eq('id', id)
+        .eq('user_id', req.user!.userId)
+        .select('*, courses:course_id(id, name, color)')
+        .single();
+
+      if (error) throw new NotFoundError('Task', id);
+
+      const { courses, user_id, ...rest } = data as Record<string, unknown>;
+      res.json({ ...toCamel(rest), course: courses ? toCamel(courses) : null });
     } catch (err) {
       next(err);
     }
@@ -117,12 +172,15 @@ router.patch(
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const existing = await prisma.task.findFirst({
-      where: { id, userId: req.user!.userId },
-    });
-    if (!existing) throw new NotFoundError('Task', id);
+    const supabase = getSupabase();
 
-    await prisma.task.delete({ where: { id } });
+    const { error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user!.userId);
+
+    if (error) throw new NotFoundError('Task', id);
     res.status(204).end();
   } catch (err) {
     next(err);

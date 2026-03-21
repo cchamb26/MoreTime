@@ -1,6 +1,7 @@
-import { prisma } from '../utils/db.js';
+import { getSupabase } from '../utils/supabase.js';
 import { generateScheduleBlocks, ScheduleBlockInput } from './ai.js';
 import { ValidationError } from '../utils/errors.js';
+import { toCamel } from '../utils/transform.js';
 
 interface ScheduleResult {
   blocksCreated: number;
@@ -8,7 +9,7 @@ interface ScheduleResult {
   blocks: Array<{
     id: string;
     taskId: string | null;
-    date: Date;
+    date: string;
     startTime: string;
     endTime: string;
   }>;
@@ -33,44 +34,39 @@ function blocksOverlap(
 
 function validateBlocks(
   generated: ScheduleBlockInput[],
-  lockedBlocks: Array<{ date: Date; startTime: string; endTime: string }>,
+  lockedBlocks: Array<{ date: string; start_time: string; end_time: string }>,
   taskIds: Set<string>,
 ): { valid: ScheduleBlockInput[]; warnings: string[] } {
   const warnings: string[] = [];
   const valid: ScheduleBlockInput[] = [];
 
   for (const block of generated) {
-    // Check task exists
     if (!taskIds.has(block.taskId)) {
       warnings.push(`Skipped block for unknown task ${block.taskId}`);
       continue;
     }
 
-    // Check time format
     if (!/^\d{2}:\d{2}$/.test(block.startTime) || !/^\d{2}:\d{2}$/.test(block.endTime)) {
       warnings.push(`Skipped block with invalid time format: ${block.startTime}-${block.endTime}`);
       continue;
     }
 
-    // Check start < end
     if (timeToMinutes(block.startTime) >= timeToMinutes(block.endTime)) {
       warnings.push(`Skipped block where start >= end: ${block.startTime}-${block.endTime}`);
       continue;
     }
 
-    // Check against locked blocks on same date
     const blockDate = block.date;
     const conflictsLocked = lockedBlocks.some(
       (locked) =>
-        locked.date.toISOString().slice(0, 10) === blockDate &&
-        blocksOverlap(block, locked),
+        locked.date === blockDate &&
+        blocksOverlap(block, { startTime: locked.start_time, endTime: locked.end_time }),
     );
     if (conflictsLocked) {
       warnings.push(`Skipped block on ${blockDate} ${block.startTime}-${block.endTime} — conflicts with locked block`);
       continue;
     }
 
-    // Check against already-accepted blocks
     const conflictsAccepted = valid.some(
       (v) => v.date === blockDate && blocksOverlap(block, v),
     );
@@ -86,65 +82,71 @@ function validateBlocks(
 }
 
 export async function generateSchedule(userId: string): Promise<ScheduleResult> {
-  // Gather user data
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const supabase = getSupabase();
+
+  const { data: user } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
   if (!user) throw new ValidationError('User not found');
 
-  const tasks = await prisma.task.findMany({
-    where: {
-      userId,
-      status: { not: 'completed' },
-    },
-    include: { course: { select: { name: true } } },
-  });
+  const { data: tasks } = await supabase
+    .from('tasks')
+    .select('*, courses:course_id(name)')
+    .eq('user_id', userId)
+    .neq('status', 'completed');
 
-  if (tasks.length === 0) {
+  if (!tasks || tasks.length === 0) {
     return { blocksCreated: 0, blocksRemoved: 0, blocks: [], warnings: ['No pending tasks to schedule'] };
   }
 
-  // Get date range: today to furthest deadline (or 14 days out)
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
   const maxDate = new Date(today);
   maxDate.setDate(maxDate.getDate() + 30);
 
-  const furthestDeadline = tasks.reduce((max, t) => {
-    if (t.dueDate && t.dueDate > max) return t.dueDate;
+  const furthestDeadline = tasks.reduce((max: Date, t: Record<string, unknown>) => {
+    if (t.due_date) {
+      const d = new Date(t.due_date as string);
+      if (d > max) return d;
+    }
     return max;
   }, new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000));
 
   const endDate = furthestDeadline < maxDate ? furthestDeadline : maxDate;
+  const endDateStr = endDate.toISOString().slice(0, 10);
 
-  // Get locked blocks in range
-  const lockedBlocks = await prisma.scheduleBlock.findMany({
-    where: {
-      userId,
-      isLocked: true,
-      date: { gte: today, lte: endDate },
-    },
-  });
+  const { data: lockedBlocks } = await supabase
+    .from('schedule_blocks')
+    .select('date, start_time, end_time, label')
+    .eq('user_id', userId)
+    .eq('is_locked', true)
+    .gte('date', todayStr)
+    .lte('date', endDateStr);
 
   const preferences = (user.preferences as Record<string, unknown>) || {};
 
-  // Build prompt
-  const taskDescriptions = tasks.map((t) => ({
+  const taskDescriptions = tasks.map((t: Record<string, unknown>) => ({
     taskId: t.id,
     title: t.title,
-    course: t.course?.name ?? 'General',
-    dueDate: t.dueDate?.toISOString().slice(0, 10) ?? 'No deadline',
+    course: (t.courses as Record<string, unknown> | null)?.name ?? 'General',
+    dueDate: t.due_date ? (t.due_date as string).slice(0, 10) : 'No deadline',
     priority: t.priority,
-    estimatedHours: t.estimatedHours,
-    hoursRemaining: t.estimatedHours, // Could subtract already-scheduled hours
+    estimatedHours: t.estimated_hours,
+    hoursRemaining: t.estimated_hours,
   }));
 
-  const lockedDescriptions = lockedBlocks.map((b) => ({
-    date: b.date.toISOString().slice(0, 10),
-    startTime: b.startTime,
-    endTime: b.endTime,
+  const lockedDescriptions = (lockedBlocks ?? []).map((b: Record<string, unknown>) => ({
+    date: b.date,
+    startTime: b.start_time,
+    endTime: b.end_time,
     label: b.label ?? 'Locked',
   }));
 
-  const prompt = `Today is ${today.toISOString().slice(0, 10)}. Schedule through ${endDate.toISOString().slice(0, 10)}.
+  const prompt = `Today is ${todayStr}. Schedule through ${endDateStr}.
 
 Student preferences:
 - Preferred study hours: ${preferences.preferredStartTime ?? '09:00'} to ${preferences.preferredEndTime ?? '22:00'}
@@ -160,10 +162,9 @@ ${JSON.stringify(lockedDescriptions, null, 2)}
 
 Generate an optimal study schedule. Spread work evenly, prioritize high-priority and approaching-deadline tasks.`;
 
-  // Generate with up to 2 retries
   let allWarnings: string[] = [];
   let validBlocks: ScheduleBlockInput[] = [];
-  const taskIds = new Set(tasks.map((t) => t.id));
+  const taskIds = new Set(tasks.map((t: Record<string, unknown>) => t.id as string));
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const retryContext =
@@ -172,7 +173,7 @@ Generate an optimal study schedule. Spread work evenly, prioritize high-priority
         : '';
 
     const generated = await generateScheduleBlocks(prompt + retryContext);
-    const { valid, warnings } = validateBlocks(generated, lockedBlocks, taskIds);
+    const { valid, warnings } = validateBlocks(generated, lockedBlocks ?? [], taskIds);
 
     if (valid.length > 0 || attempt === 2) {
       validBlocks = valid;
@@ -184,34 +185,37 @@ Generate an optimal study schedule. Spread work evenly, prioritize high-priority
   }
 
   // Remove existing non-locked blocks in the date range
-  const deleted = await prisma.scheduleBlock.deleteMany({
-    where: {
-      userId,
-      isLocked: false,
-      date: { gte: today, lte: endDate },
-    },
-  });
+  const { count: removedCount } = await supabase
+    .from('schedule_blocks')
+    .delete({ count: 'exact' })
+    .eq('user_id', userId)
+    .eq('is_locked', false)
+    .gte('date', todayStr)
+    .lte('date', endDateStr);
 
   // Insert new blocks
   const created = [];
   for (const block of validBlocks) {
-    const record = await prisma.scheduleBlock.create({
-      data: {
-        userId,
-        taskId: block.taskId,
-        date: new Date(block.date),
-        startTime: block.startTime,
-        endTime: block.endTime,
-        isLocked: false,
-      },
-    });
-    created.push(record);
+    const { data: record } = await supabase
+      .from('schedule_blocks')
+      .insert({
+        user_id: userId,
+        task_id: block.taskId,
+        date: block.date,
+        start_time: block.startTime,
+        end_time: block.endTime,
+        is_locked: false,
+      })
+      .select()
+      .single();
+
+    if (record) created.push(toCamel(record));
   }
 
   return {
     blocksCreated: created.length,
-    blocksRemoved: deleted.count,
-    blocks: created,
+    blocksRemoved: removedCount ?? 0,
+    blocks: created as ScheduleResult['blocks'],
     warnings: allWarnings,
   };
 }
