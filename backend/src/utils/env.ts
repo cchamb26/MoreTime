@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   DATABASE_URL: z.string(),
+  DIRECT_URL: z.string().optional(),
   JWT_SECRET: z.string(),
   JWT_REFRESH_SECRET: z.string(),
   AZURE_OPENAI_ENDPOINT: z.string(),

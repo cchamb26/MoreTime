@@ -24,7 +24,7 @@ final class APIClient {
     #if DEBUG
     var baseURL = "http://localhost:3000"
     #else
-    var baseURL = "https://api.moretime.app"
+    var baseURL = "https://moretime-gdbwhjgfdxeyhtfw.canadacentral-01.azurewebsites.net"
     #endif
 
     private let decoder: JSONDecoder = {
