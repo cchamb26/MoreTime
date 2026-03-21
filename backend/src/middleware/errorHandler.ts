@@ -12,6 +12,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
 
   console.error('Unhandled error:', err);
   res.status(500).json({
-    error: 'Internal server error',
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message || 'Internal server error',
+    details: process.env.NODE_ENV === 'production' ? undefined : String(err),
   });
 }

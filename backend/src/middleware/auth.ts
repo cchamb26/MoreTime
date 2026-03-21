@@ -15,7 +15,8 @@ declare global {
   }
 }
 
-const DEV_USER_ID = 'dev-bypass-user';
+// Fixed UUID so it works with Supabase's uuid columns
+const DEV_USER_ID = '00000000-0000-0000-0000-000000000000';
 const DEV_EMAIL = 'dev@moretime.local';
 
 export function authGuard(req: Request, _res: Response, next: NextFunction): void {

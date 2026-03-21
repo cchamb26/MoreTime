@@ -14,7 +14,7 @@ final class AuthStore {
         // Dev bypass: skip auth so you can test everything else
         isAuthenticated = true
         currentUser = UserProfile(
-            id: "dev-bypass-user",
+            id: "00000000-0000-0000-0000-000000000000",
             email: "dev@moretime.local",
             name: "Dev User",
             timezone: "America/New_York",

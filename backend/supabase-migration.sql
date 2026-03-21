@@ -1,8 +1,17 @@
 -- MoreTime Supabase Migration
 -- Run this in the Supabase SQL Editor to create all required tables.
 
+-- Clean slate: drop any existing tables and functions
+drop table if exists public.chat_messages cascade;
+drop table if exists public.file_uploads cascade;
+drop table if exists public.schedule_blocks cascade;
+drop table if exists public.tasks cascade;
+drop table if exists public.courses cascade;
+drop table if exists public.profiles cascade;
+drop function if exists public.handle_new_user() cascade;
+
 -- Profiles table (linked to Supabase Auth users)
-create table if not exists public.profiles (
+create table public.profiles (
   id uuid references auth.users on delete cascade primary key,
   email text not null,
   name text not null,
@@ -33,7 +42,7 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- Courses
-create table if not exists public.courses (
+create table public.courses (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   name text not null,
@@ -42,10 +51,10 @@ create table if not exists public.courses (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists idx_courses_user_id on public.courses(user_id);
+create index idx_courses_user_id on public.courses(user_id);
 
 -- Tasks
-create table if not exists public.tasks (
+create table public.tasks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   course_id uuid references public.courses(id) on delete set null,
@@ -59,12 +68,12 @@ create table if not exists public.tasks (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists idx_tasks_user_id on public.tasks(user_id);
-create index if not exists idx_tasks_course_id on public.tasks(course_id);
-create index if not exists idx_tasks_due_date on public.tasks(due_date);
+create index idx_tasks_user_id on public.tasks(user_id);
+create index idx_tasks_course_id on public.tasks(course_id);
+create index idx_tasks_due_date on public.tasks(due_date);
 
 -- Schedule Blocks
-create table if not exists public.schedule_blocks (
+create table public.schedule_blocks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   task_id uuid references public.tasks(id) on delete set null,
@@ -76,11 +85,11 @@ create table if not exists public.schedule_blocks (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists idx_schedule_blocks_user_date on public.schedule_blocks(user_id, date);
-create index if not exists idx_schedule_blocks_task_id on public.schedule_blocks(task_id);
+create index idx_schedule_blocks_user_date on public.schedule_blocks(user_id, date);
+create index idx_schedule_blocks_task_id on public.schedule_blocks(task_id);
 
 -- File Uploads
-create table if not exists public.file_uploads (
+create table public.file_uploads (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   course_id uuid references public.courses(id) on delete set null,
@@ -93,11 +102,11 @@ create table if not exists public.file_uploads (
   parsed_at timestamptz,
   created_at timestamptz not null default now()
 );
-create index if not exists idx_file_uploads_user_id on public.file_uploads(user_id);
-create index if not exists idx_file_uploads_course_id on public.file_uploads(course_id);
+create index idx_file_uploads_user_id on public.file_uploads(user_id);
+create index idx_file_uploads_course_id on public.file_uploads(course_id);
 
 -- Chat Messages
-create table if not exists public.chat_messages (
+create table public.chat_messages (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   role text not null,
@@ -105,8 +114,8 @@ create table if not exists public.chat_messages (
   session_id text not null,
   timestamp timestamptz not null default now()
 );
-create index if not exists idx_chat_messages_user_session on public.chat_messages(user_id, session_id);
-create index if not exists idx_chat_messages_timestamp on public.chat_messages(timestamp);
+create index idx_chat_messages_user_session on public.chat_messages(user_id, session_id);
+create index idx_chat_messages_timestamp on public.chat_messages(timestamp);
 
 -- Enable RLS on all tables (service role key bypasses RLS, so this is a safety net)
 alter table public.profiles enable row level security;
@@ -117,12 +126,8 @@ alter table public.file_uploads enable row level security;
 alter table public.chat_messages enable row level security;
 
 -- RLS policies: allow users to access only their own data
--- (The backend uses the service role key which bypasses RLS,
---  but these policies protect against direct Supabase client access)
-
 create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
 create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
-
 create policy "Users can manage own courses" on public.courses for all using (auth.uid() = user_id);
 create policy "Users can manage own tasks" on public.tasks for all using (auth.uid() = user_id);
 create policy "Users can manage own schedule" on public.schedule_blocks for all using (auth.uid() = user_id);

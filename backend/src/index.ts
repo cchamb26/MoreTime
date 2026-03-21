@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middleware/errorHandler.js';
+import { getSupabase } from './utils/supabase.js';
 
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
@@ -46,6 +47,27 @@ app.use('/voice', aiLimiter, voiceRoutes);
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Dev bypass: create a dev auth user so the profile trigger fires
+if (process.env.DEV_BYPASS_AUTH === 'true') {
+  const DEV_ID = '00000000-0000-0000-0000-000000000000';
+  const supabase = getSupabase();
+  supabase.auth.admin
+    .createUser({
+      id: DEV_ID,
+      email: 'dev@moretime.local',
+      password: 'devbypass123',
+      email_confirm: true,
+      user_metadata: { name: 'Dev User', timezone: 'America/New_York' },
+    })
+    .then(({ error }) => {
+      if (error && !error.message.includes('already')) {
+        console.error('Failed to seed dev user:', error.message);
+      } else {
+        console.log('Dev bypass auth enabled — dev user seeded');
+      }
+    });
+}
 
 // Error handler (must be last)
 app.use(errorHandler);
