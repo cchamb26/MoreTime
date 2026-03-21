@@ -186,26 +186,50 @@ struct FileUploadView: View {
         isUploading = true
         defer { isUploading = false }
 
+        // Read file data and release security-scoped access before async upload
+        struct FilePayload {
+            let data: Data
+            let fileName: String
+            let mimeType: String
+        }
+
+        var payloads: [FilePayload] = []
         for url in urls {
             guard url.startAccessingSecurityScopedResource() else { continue }
             defer { url.stopAccessingSecurityScopedResource() }
+            if let data = try? Data(contentsOf: url) {
+                payloads.append(FilePayload(data: data, fileName: url.lastPathComponent, mimeType: mimeType(for: url)))
+            }
+        }
 
-            do {
-                let data = try Data(contentsOf: url)
-                let mime = mimeType(for: url)
-                var fields: [String: String] = [:]
-                if let courseId { fields["courseId"] = courseId }
+        // Upload all files in parallel
+        var fields: [String: String] = [:]
+        if let courseId { fields["courseId"] = courseId }
 
-                let files: [FileUploadResponse] = try await api.upload(
-                    path: "/files/upload",
-                    fileData: data,
-                    fileName: url.lastPathComponent,
-                    mimeType: mime,
-                    additionalFields: fields
-                )
-                uploadedFiles.append(contentsOf: files)
-            } catch {
-                self.error = error.localizedDescription
+        await withTaskGroup(of: Result<[FileUploadResponse], Error>.self) { group in
+            for payload in payloads {
+                group.addTask {
+                    do {
+                        let files: [FileUploadResponse] = try await self.api.upload(
+                            path: "/files/upload",
+                            fileData: payload.data,
+                            fileName: payload.fileName,
+                            mimeType: payload.mimeType,
+                            additionalFields: fields
+                        )
+                        return .success(files)
+                    } catch {
+                        return .failure(error)
+                    }
+                }
+            }
+            for await result in group {
+                switch result {
+                case .success(let files):
+                    uploadedFiles.append(contentsOf: files)
+                case .failure(let err):
+                    self.error = err.localizedDescription
+                }
             }
         }
 
@@ -216,15 +240,33 @@ struct FileUploadView: View {
     private func pollParseStatus() async {
         for _ in 0..<30 { // Max 30 attempts, 2s each
             try? await Task.sleep(for: .seconds(2))
-            var allDone = true
-            for (i, file) in uploadedFiles.enumerated() {
-                if file.parseStatus == "pending" || file.parseStatus == "parsing" {
-                    allDone = false
-                    if let updated: FileUploadResponse = try? await api.request("GET", path: "/files/\(file.id)") {
-                        uploadedFiles[i] = updated
+
+            // Gather IDs of files still pending on the main actor,
+            // then fetch updates concurrently off the main actor.
+            let pendingFiles = uploadedFiles.enumerated().filter {
+                $0.element.parseStatus == "pending" || $0.element.parseStatus == "parsing"
+            }
+            guard !pendingFiles.isEmpty else { break }
+
+            let updates: [(Int, FileUploadResponse)] = await withTaskGroup(of: (Int, FileUploadResponse?).self) { group in
+                for (i, file) in pendingFiles {
+                    group.addTask {
+                        let updated: FileUploadResponse? = try? await self.api.request("GET", path: "/files/\(file.id)")
+                        return (i, updated)
                     }
                 }
+                var results: [(Int, FileUploadResponse)] = []
+                for await (i, updated) in group {
+                    if let updated { results.append((i, updated)) }
+                }
+                return results
             }
+
+            for (i, updated) in updates {
+                uploadedFiles[i] = updated
+            }
+
+            let allDone = uploadedFiles.allSatisfy { $0.parseStatus != "pending" && $0.parseStatus != "parsing" }
             if allDone { break }
         }
     }
@@ -233,12 +275,26 @@ struct FileUploadView: View {
         isExtracting = true
         defer { isExtracting = false }
 
-        for file in uploadedFiles where file.parseStatus == "completed" {
-            do {
-                let result: ExtractTasksResponse = try await api.request("POST", path: "/files/\(file.id)/extract-tasks")
-                extractedTasks.append(contentsOf: result.tasks)
-            } catch {
-                self.error = error.localizedDescription
+        let completedFiles = uploadedFiles.filter { $0.parseStatus == "completed" }
+
+        await withTaskGroup(of: Result<[TaskItem], Error>.self) { group in
+            for file in completedFiles {
+                group.addTask {
+                    do {
+                        let result: ExtractTasksResponse = try await self.api.request("POST", path: "/files/\(file.id)/extract-tasks")
+                        return .success(result.tasks)
+                    } catch {
+                        return .failure(error)
+                    }
+                }
+            }
+            for await result in group {
+                switch result {
+                case .success(let tasks):
+                    extractedTasks.append(contentsOf: tasks)
+                case .failure(let err):
+                    self.error = err.localizedDescription
+                }
             }
         }
     }

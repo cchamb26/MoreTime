@@ -1,6 +1,17 @@
 import Foundation
 import SwiftData
 
+private let sharedISOFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    return f
+}()
+
+private let sharedDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f
+}()
+
 @Model
 final class CachedTask {
     @Attribute(.unique) var id: String
@@ -20,7 +31,7 @@ final class CachedTask {
         self.courseId = task.courseId
         self.title = task.title
         self.taskDescription = task.description ?? ""
-        self.dueDate = task.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+        self.dueDate = task.dueDate.flatMap { sharedISOFormatter.date(from: $0) }
         self.priority = task.priority
         self.estimatedHours = task.estimatedHours
         self.status = task.status
@@ -46,9 +57,7 @@ final class CachedScheduleBlock {
     init(from block: ScheduleBlock) {
         self.id = block.id
         self.taskId = block.taskId
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        self.date = formatter.date(from: block.date) ?? Date()
+        self.date = sharedDateFormatter.date(from: block.date) ?? Date()
         self.startTime = block.startTime
         self.endTime = block.endTime
         self.isLocked = block.isLocked

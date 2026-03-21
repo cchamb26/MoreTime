@@ -18,7 +18,6 @@ enum APIError: LocalizedError {
     }
 }
 
-@Observable
 final class APIClient {
     static let shared = APIClient()
 

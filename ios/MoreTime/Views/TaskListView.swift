@@ -113,6 +113,17 @@ struct TaskListView: View {
 struct TaskRow: View {
     let task: TaskItem
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        return f
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
     var body: some View {
         HStack(spacing: 12) {
             Circle()
@@ -146,16 +157,12 @@ struct TaskRow: View {
     }
 
     private func formatDueDate(_ dateStr: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: dateStr) else { return dateStr }
-        let display = DateFormatter()
-        display.dateFormat = "MMM d"
-        return display.string(from: date)
+        guard let date = Self.isoFormatter.date(from: dateStr) else { return dateStr }
+        return Self.displayFormatter.string(from: date)
     }
 
     private func isDueSoon(_ dateStr: String) -> Bool {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: dateStr) else { return false }
+        guard let date = Self.isoFormatter.date(from: dateStr) else { return false }
         return date.timeIntervalSinceNow < 3 * 24 * 60 * 60 && date.timeIntervalSinceNow > 0
     }
 }

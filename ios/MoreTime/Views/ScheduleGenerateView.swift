@@ -27,6 +27,7 @@ struct ScheduleGenerateView: View {
     }
 
     private var preGenerateView: some View {
+        let stats = pendingTaskStats
         VStack(spacing: 24) {
             Spacer()
 
@@ -44,9 +45,9 @@ struct ScheduleGenerateView: View {
                 .padding(.horizontal, 32)
 
             VStack(spacing: 8) {
-                InfoRow(label: "Pending tasks", value: "\(pendingTaskCount)")
-                InfoRow(label: "Total estimated hours", value: String(format: "%.1fh", totalHours))
-                InfoRow(label: "Tasks with deadlines", value: "\(tasksWithDeadlines)")
+                InfoRow(label: "Pending tasks", value: "\(stats.count)")
+                InfoRow(label: "Total estimated hours", value: String(format: "%.1fh", stats.totalHours))
+                InfoRow(label: "Tasks with deadlines", value: "\(stats.withDeadlines)")
             }
             .padding()
             .background(.gray.opacity(0.06))
@@ -55,17 +56,17 @@ struct ScheduleGenerateView: View {
 
             Spacer()
 
-            if pendingTaskCount == 0 {
+            if stats.count == 0 {
                 Text("Add some tasks first to generate a schedule")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            generateButton
+            generateButton(disabled: stats.count == 0)
         }
     }
 
-    private var generateButton: some View {
+    private func generateButton(disabled: Bool) -> some View {
         Button {
             Task { await generate() }
         } label: {
@@ -87,7 +88,7 @@ struct ScheduleGenerateView: View {
         .tint(.primary)
         .foregroundStyle(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .disabled(scheduleStore.isGenerating || pendingTaskCount == 0)
+        .disabled(scheduleStore.isGenerating || disabled)
         .padding(.horizontal)
         .padding(.bottom)
     }
@@ -161,16 +162,16 @@ struct ScheduleGenerateView: View {
         }
     }
 
-    private var pendingTaskCount: Int {
-        taskStore.tasks.filter { $0.status != "completed" }.count
-    }
-
-    private var totalHours: Double {
-        taskStore.tasks.filter { $0.status != "completed" }.reduce(0) { $0 + $1.estimatedHours }
-    }
-
-    private var tasksWithDeadlines: Int {
-        taskStore.tasks.filter { $0.status != "completed" && $0.dueDate != nil }.count
+    private var pendingTaskStats: (count: Int, totalHours: Double, withDeadlines: Int) {
+        var count = 0
+        var hours = 0.0
+        var deadlines = 0
+        for task in taskStore.tasks where task.status != "completed" {
+            count += 1
+            hours += task.estimatedHours
+            if task.dueDate != nil { deadlines += 1 }
+        }
+        return (count, hours, deadlines)
     }
 
     private func generate() async {

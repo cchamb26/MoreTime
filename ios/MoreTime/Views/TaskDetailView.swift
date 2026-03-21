@@ -4,6 +4,8 @@ struct TaskDetailView: View {
     @Environment(TaskStore.self) private var taskStore
     @Environment(\.dismiss) private var dismiss
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     let task: TaskItem
     @State private var title: String
     @State private var description: String
@@ -19,8 +21,7 @@ struct TaskDetailView: View {
         self.task = task
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description ?? "")
-        let formatter = ISO8601DateFormatter()
-        let date = task.dueDate.flatMap { formatter.date(from: $0) }
+        let date = task.dueDate.flatMap { Self.isoFormatter.date(from: $0) }
         _dueDate = State(initialValue: date ?? Date())
         _hasDueDate = State(initialValue: date != nil)
         _priority = State(initialValue: task.priority)
@@ -103,8 +104,7 @@ struct TaskDetailView: View {
         isSaving = true
         defer { isSaving = false }
 
-        let formatter = ISO8601DateFormatter()
-        let dueDateStr = hasDueDate ? formatter.string(from: dueDate) : nil
+        let dueDateStr = hasDueDate ? Self.isoFormatter.string(from: dueDate) : nil
 
         let request = UpdateTaskRequest(
             title: title,
@@ -197,16 +197,17 @@ struct TaskCreateView: View {
         }
     }
 
+    private static let isoFormatter = ISO8601DateFormatter()
+
     private func create() async {
         isSaving = true
         defer { isSaving = false }
 
-        let formatter = ISO8601DateFormatter()
         let request = CreateTaskRequest(
             courseId: selectedCourseId,
             title: title,
             description: description.isEmpty ? nil : description,
-            dueDate: hasDueDate ? formatter.string(from: dueDate) : nil,
+            dueDate: hasDueDate ? Self.isoFormatter.string(from: dueDate) : nil,
             priority: priority,
             estimatedHours: estimatedHours,
             status: nil

@@ -41,13 +41,18 @@ final class AudioRecorder: NSObject {
             audioRecorder?.record()
             isRecording = true
 
-            // Start level monitoring
-            levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                self?.audioRecorder?.updateMeters()
-                let level = self?.audioRecorder?.averagePower(forChannel: 0) ?? -160
+            // Start level monitoring at ~10 Hz (sufficient for visual feedback,
+            // halves the view invalidation rate vs the previous 20 Hz)
+            levelTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                guard let self, let recorder = self.audioRecorder else { return }
+                recorder.updateMeters()
+                let level = recorder.averagePower(forChannel: 0)
                 // Normalize: -160 to 0 dB → 0 to 1
                 let normalized = max(0, min(1, (level + 50) / 50))
-                self?.audioLevel = normalized
+                // Only update the published property when the change is visually meaningful
+                if abs(normalized - self.audioLevel) > 0.02 {
+                    self.audioLevel = normalized
+                }
             }
 
             return true

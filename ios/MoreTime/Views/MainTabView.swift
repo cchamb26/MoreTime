@@ -25,14 +25,15 @@ struct MainTabView: View {
         }
         .tint(.primary)
         .task {
-            await taskStore.fetchTasks()
-            await taskStore.fetchCourses()
-
             let now = Date()
             let calendar = Calendar.current
             let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
             let end = calendar.date(byAdding: .month, value: 1, to: start)!
-            await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+
+            async let fetchTasks: Void = taskStore.fetchTasks()
+            async let fetchCourses: Void = taskStore.fetchCourses()
+            async let fetchBlocks: Void = scheduleStore.fetchBlocks(startDate: start, endDate: end)
+            _ = await (fetchTasks, fetchCourses, fetchBlocks)
         }
     }
 }

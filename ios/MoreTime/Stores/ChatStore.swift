@@ -16,6 +16,10 @@ final class ChatStore {
 
     private let api = APIClient.shared
 
+    /// Maximum number of messages kept in memory.
+    /// Older messages are dropped from the front once this limit is exceeded.
+    private let maxMessages = 200
+
     func sendMessage(_ text: String) async {
         let userBubble = ChatBubble(role: "user", content: text, timestamp: Date())
         messages.append(userBubble)
@@ -31,6 +35,7 @@ final class ChatStore {
             sessionId = response.sessionId
             let assistantBubble = ChatBubble(role: "assistant", content: response.response, timestamp: Date())
             messages.append(assistantBubble)
+            trimMessages()
         } catch {
             self.error = error.localizedDescription
         }
@@ -42,7 +47,11 @@ final class ChatStore {
         defer { isLoading = false }
 
         do {
-            let data = try Data(contentsOf: audioURL)
+            // Read file data off the main thread to avoid blocking UI
+            let data = try await Task.detached {
+                try Data(contentsOf: audioURL)
+            }.value
+
             var fields: [String: String] = [:]
             if let sid = sessionId { fields["sessionId"] = sid }
 
@@ -62,6 +71,7 @@ final class ChatStore {
 
             let assistantBubble = ChatBubble(role: "assistant", content: response.response, timestamp: Date())
             messages.append(assistantBubble)
+            trimMessages()
         } catch {
             self.error = error.localizedDescription
         }
@@ -70,5 +80,11 @@ final class ChatStore {
     func clearSession() {
         messages.removeAll()
         sessionId = nil
+    }
+
+    private func trimMessages() {
+        if messages.count > maxMessages {
+            messages.removeFirst(messages.count - maxMessages)
+        }
     }
 }

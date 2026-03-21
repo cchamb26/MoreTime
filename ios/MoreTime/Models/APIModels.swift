@@ -63,10 +63,20 @@ struct TaskItem: Codable, Identifiable, Hashable {
     let updatedAt: String?
     var course: CourseRef?
 
-    struct CourseRef: Codable {
+    struct CourseRef: Codable, Hashable {
         let id: String
         let name: String
         let color: String
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: TaskItem, rhs: TaskItem) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.status == rhs.status &&
+        lhs.priority == rhs.priority && lhs.dueDate == rhs.dueDate &&
+        lhs.estimatedHours == rhs.estimatedHours && lhs.courseId == rhs.courseId
     }
 }
 

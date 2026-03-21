@@ -154,6 +154,12 @@ struct LockedBlocksView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     private func addLockedBlock() {
         let calendar = Calendar.current
         let today = Date()
@@ -163,13 +169,10 @@ struct LockedBlocksView: View {
         components.weekday = selectedDay + 1
         guard let targetDate = calendar.date(from: components) else { return }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-
         Task {
             let request = CreateBlockRequest(
                 taskId: nil,
-                date: formatter.string(from: targetDate),
+                date: Self.dateFormatter.string(from: targetDate),
                 startTime: startTime,
                 endTime: endTime,
                 isLocked: true,

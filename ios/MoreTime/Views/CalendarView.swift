@@ -6,13 +6,24 @@ struct CalendarView: View {
     @State private var showGenerateSheet = false
 
     private let calendar = Calendar.current
-    private let dateFormatter: DateFormatter = {
+
+    private static let monthYearFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMMM yyyy"
         return f
     }()
 
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     var body: some View {
+        // Pre-compute days and blocks-by-date once per render, not per cell
+        let days = daysInMonth()
+        let blocksByDate = buildBlocksByDateMap()
+
         NavigationStack {
             VStack(spacing: 0) {
                 // Month navigation
@@ -26,7 +37,7 @@ struct CalendarView: View {
 
                     Spacer()
 
-                    Text(dateFormatter.string(from: selectedDate))
+                    Text(Self.monthYearFormatter.string(from: selectedDate))
                         .font(.headline)
 
                     Spacer()
@@ -54,13 +65,14 @@ struct CalendarView: View {
 
                 // Calendar grid
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 4) {
-                    ForEach(daysInMonth(), id: \.self) { date in
+                    ForEach(days, id: \.self) { date in
                         if let date {
+                            let dateKey = Self.dayKeyFormatter.string(from: date)
                             CalendarDayCell(
                                 date: date,
                                 isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
                                 isToday: calendar.isDateInToday(date),
-                                blocks: scheduleStore.blocksForDate(date)
+                                blocks: blocksByDate[dateKey] ?? []
                             )
                             .onTapGesture {
                                 withAnimation(.easeInOut(duration: 0.15)) {
@@ -101,6 +113,20 @@ struct CalendarView: View {
                 ScheduleGenerateView()
             }
         }
+    }
+
+    /// Build a dictionary keyed by "yyyy-MM-dd" to avoid per-cell filter+sort
+    private func buildBlocksByDateMap() -> [String: [ScheduleBlock]] {
+        var map: [String: [ScheduleBlock]] = [:]
+        for block in scheduleStore.blocks {
+            let key = String(block.date.prefix(10))
+            map[key, default: []].append(block)
+        }
+        // Sort each day's blocks by startTime once
+        for key in map.keys {
+            map[key]?.sort { $0.startTime < $1.startTime }
+        }
+        return map
     }
 
     private func moveMonth(by value: Int) {
@@ -177,7 +203,7 @@ struct DayDetailView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
     let date: Date
 
-    private let dayFormatter: DateFormatter = {
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMM d"
         return f
@@ -187,7 +213,7 @@ struct DayDetailView: View {
         let blocks = scheduleStore.blocksForDate(date)
 
         VStack(alignment: .leading, spacing: 0) {
-            Text(dayFormatter.string(from: date))
+            Text(Self.dayFormatter.string(from: date))
                 .font(.headline)
                 .padding(.horizontal)
                 .padding(.top, 12)
