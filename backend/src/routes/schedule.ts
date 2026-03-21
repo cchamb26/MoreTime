@@ -124,6 +124,23 @@ router.patch(
   },
 );
 
+router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+
+    const { count, error } = await supabase
+      .from('schedule_blocks')
+      .delete({ count: 'exact' })
+      .eq('user_id', req.user!.userId)
+      .eq('is_locked', false);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
@@ -137,23 +154,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
 
     if (error) throw new NotFoundError('ScheduleBlock', id);
     res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const supabase = getSupabase();
-
-    const { count, error } = await supabase
-      .from('schedule_blocks')
-      .delete({ count: 'exact' })
-      .eq('user_id', req.user!.userId)
-      .eq('is_locked', false);
-
-    if (error) throw error;
-    res.json({ removed: count ?? 0 });
   } catch (err) {
     next(err);
   }
