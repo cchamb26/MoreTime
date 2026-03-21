@@ -3,8 +3,8 @@ import { z } from 'zod';
 const envSchema = z.object({
   DATABASE_URL: z.string(),
   DIRECT_URL: z.string().optional(),
-  JWT_SECRET: z.string(),
-  JWT_REFRESH_SECRET: z.string(),
+  JWT_SECRET: z.string().default('81d5c83f5694d83715a077dcb281ceacf2faaaaa6c0dfbf23de6016a7c4cdaf7'),
+  JWT_REFRESH_SECRET: z.string().default('a0e7931d2ae982039a3274acf0fe3ca69304244e1a7f125318113b0369bd75f6'),
   AZURE_OPENAI_ENDPOINT: z.string(),
   AZURE_OPENAI_API_KEY: z.string(),
   AZURE_OPENAI_DEPLOYMENT_NAME: z.string().default('gpt-4o'),
