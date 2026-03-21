@@ -1,0 +1,242 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct FileUploadView: View {
+    @Environment(TaskStore.self) private var taskStore
+    @Environment(\.dismiss) private var dismiss
+
+    let courseId: String?
+
+    @State private var isPickerPresented = false
+    @State private var uploadedFiles: [FileUploadResponse] = []
+    @State private var isUploading = false
+    @State private var isExtracting = false
+    @State private var extractedTasks: [TaskItem] = []
+    @State private var error: String?
+
+    private let api = APIClient.shared
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if uploadedFiles.isEmpty && extractedTasks.isEmpty {
+                    // Upload prompt
+                    VStack(spacing: 16) {
+                        Spacer()
+
+                        Image(systemName: "doc.badge.plus")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+
+                        Text("Upload Syllabus or Documents")
+                            .font(.headline)
+
+                        Text("Supports PDF, DOCX, TXT, and images")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            isPickerPresented = true
+                        } label: {
+                            Label("Choose Files", systemImage: "folder")
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.primary)
+                        .foregroundStyle(.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 40)
+
+                        Spacer()
+                    }
+                } else if !extractedTasks.isEmpty {
+                    // Extracted tasks preview
+                    List {
+                        Section("Extracted Tasks (\(extractedTasks.count))") {
+                            ForEach(extractedTasks) { task in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(task.title)
+                                        .font(.subheadline.weight(.medium))
+                                    HStack {
+                                        if let due = task.dueDate {
+                                            Text(due.prefix(10))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Text("\(task.estimatedHours, specifier: "%.1f")h")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                } else {
+                    // Upload progress / status
+                    List {
+                        Section("Uploaded Files") {
+                            ForEach(uploadedFiles) { file in
+                                HStack {
+                                    Image(systemName: iconForMime(file.mimeType))
+                                    VStack(alignment: .leading) {
+                                        Text(file.originalName)
+                                            .font(.subheadline)
+                                        Text(file.parseStatus.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(file.parseStatus == "completed" ? .green : .secondary)
+                                    }
+                                    Spacer()
+                                    if file.parseStatus == "parsing" {
+                                        ProgressView()
+                                    } else if file.parseStatus == "completed" {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+
+                if let error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
+            }
+            .navigationTitle("Upload Files")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                if !uploadedFiles.isEmpty && extractedTasks.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            Task { await extractTasks() }
+                        } label: {
+                            if isExtracting {
+                                ProgressView()
+                            } else {
+                                Text("Extract Tasks")
+                            }
+                        }
+                        .disabled(isExtracting || uploadedFiles.allSatisfy { $0.parseStatus != "completed" })
+                    }
+                }
+                if !extractedTasks.isEmpty {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            Task {
+                                await taskStore.fetchTasks()
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+            }
+            .fileImporter(
+                isPresented: $isPickerPresented,
+                allowedContentTypes: [.pdf, .plainText, .png, .jpeg,
+                    UTType(filenameExtension: "docx") ?? .data],
+                allowsMultipleSelection: true
+            ) { result in
+                Task { await handleFileSelection(result) }
+            }
+            .overlay {
+                if isUploading {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    ProgressView("Uploading...")
+                        .padding(24)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func handleFileSelection(_ result: Result<[URL], Error>) async {
+        guard case .success(let urls) = result else { return }
+        isUploading = true
+        defer { isUploading = false }
+
+        for url in urls {
+            guard url.startAccessingSecurityScopedResource() else { continue }
+            defer { url.stopAccessingSecurityScopedResource() }
+
+            do {
+                let data = try Data(contentsOf: url)
+                let mime = mimeType(for: url)
+                var fields: [String: String] = [:]
+                if let courseId { fields["courseId"] = courseId }
+
+                let files: [FileUploadResponse] = try await api.upload(
+                    path: "/files/upload",
+                    fileData: data,
+                    fileName: url.lastPathComponent,
+                    mimeType: mime,
+                    additionalFields: fields
+                )
+                uploadedFiles.append(contentsOf: files)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+
+        // Poll for parse completion
+        await pollParseStatus()
+    }
+
+    private func pollParseStatus() async {
+        for _ in 0..<30 { // Max 30 attempts, 2s each
+            try? await Task.sleep(for: .seconds(2))
+            var allDone = true
+            for (i, file) in uploadedFiles.enumerated() {
+                if file.parseStatus == "pending" || file.parseStatus == "parsing" {
+                    allDone = false
+                    if let updated: FileUploadResponse = try? await api.request("GET", path: "/files/\(file.id)") {
+                        uploadedFiles[i] = updated
+                    }
+                }
+            }
+            if allDone { break }
+        }
+    }
+
+    private func extractTasks() async {
+        isExtracting = true
+        defer { isExtracting = false }
+
+        for file in uploadedFiles where file.parseStatus == "completed" {
+            do {
+                let result: ExtractTasksResponse = try await api.request("POST", path: "/files/\(file.id)/extract-tasks")
+                extractedTasks.append(contentsOf: result.tasks)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func mimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "pdf": return "application/pdf"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "txt": return "text/plain"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        default: return "application/octet-stream"
+        }
+    }
+
+    private func iconForMime(_ mime: String) -> String {
+        if mime.contains("pdf") { return "doc.fill" }
+        if mime.contains("word") || mime.contains("docx") { return "doc.richtext.fill" }
+        if mime.contains("image") { return "photo.fill" }
+        return "doc.text.fill"
+    }
+}

@@ -137,3 +137,18 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Backend
+backend/dist/
+backend/uploads/
+
+# iOS / Xcode
+ios/**/*.xcuserdata
+ios/**/xcuserdata/
+ios/**/*.xcworkspace
+ios/**/DerivedData/
+ios/**/*.moved-aside
+ios/**/*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
