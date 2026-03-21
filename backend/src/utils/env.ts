@@ -7,8 +7,6 @@ const envSchema = z.object({
   AZURE_OPENAI_ENDPOINT: z.string(),
   AZURE_OPENAI_API_KEY: z.string(),
   AZURE_OPENAI_DEPLOYMENT_NAME: z.string().default('gpt-4o'),
-  AZURE_SPEECH_KEY: z.string().optional(),
-  AZURE_SPEECH_REGION: z.string().default('eastus'),
   PORT: z.string().default('3000').transform(Number),
 });
 

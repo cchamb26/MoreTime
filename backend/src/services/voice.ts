@@ -1,44 +1,37 @@
-import * as sdk from 'microsoft-cognitiveservices-speech-sdk';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { getEnv } from '../utils/env.js';
+
+interface TranscriptionResponse {
+  text: string;
+}
 
 export async function transcribeAudio(filePath: string): Promise<string> {
   const env = getEnv();
 
-  if (!env.AZURE_SPEECH_KEY) {
-    throw new Error('Azure Speech Services not configured (AZURE_SPEECH_KEY missing)');
+  const deploymentName = 'gpt-4o-transcribe-diarize';
+  const url = `${env.AZURE_OPENAI_ENDPOINT}openai/deployments/${deploymentName}/audio/transcriptions?api-version=2025-03-01-preview`;
+
+  const fileBuffer = await fs.readFile(filePath);
+  const fileName = path.basename(filePath);
+
+  const formData = new FormData();
+  formData.append('model', deploymentName);
+  formData.append('file', new Blob([fileBuffer]), fileName);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'api-key': env.AZURE_OPENAI_API_KEY,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Transcription failed (${response.status}): ${errorBody}`);
   }
 
-  const speechConfig = sdk.SpeechConfig.fromSubscription(env.AZURE_SPEECH_KEY, env.AZURE_SPEECH_REGION);
-  speechConfig.speechRecognitionLanguage = 'en-US';
-
-  const audioConfig = sdk.AudioConfig.fromWavFileInput(await fs.readFile(filePath));
-  const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
-
-  return new Promise<string>((resolve, reject) => {
-    let fullText = '';
-
-    recognizer.recognized = (_sender, event) => {
-      if (event.result.reason === sdk.ResultReason.RecognizedSpeech) {
-        fullText += event.result.text + ' ';
-      }
-    };
-
-    recognizer.canceled = (_sender, event) => {
-      if (event.reason === sdk.CancellationReason.Error) {
-        reject(new Error(`Speech recognition error: ${event.errorDetails}`));
-      }
-      recognizer.stopContinuousRecognitionAsync();
-    };
-
-    recognizer.sessionStopped = () => {
-      recognizer.stopContinuousRecognitionAsync();
-      resolve(fullText.trim());
-    };
-
-    recognizer.startContinuousRecognitionAsync(
-      () => {},
-      (err) => reject(new Error(`Failed to start recognition: ${err}`)),
-    );
-  });
+  const result = (await response.json()) as TranscriptionResponse;
+  return result.text;
 }
