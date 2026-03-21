@@ -45,8 +45,7 @@ struct FileUploadView: View {
                         .ignoresSafeArea()
                     ProgressView("Uploading...")
                         .padding(24)
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
         }

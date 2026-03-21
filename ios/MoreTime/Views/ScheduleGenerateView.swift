@@ -28,7 +28,7 @@ struct ScheduleGenerateView: View {
 
     private var preGenerateView: some View {
         let stats = pendingTaskStats
-        VStack(spacing: 24) {
+        return VStack(spacing: 24) {
             Spacer()
 
             Image(systemName: "wand.and.stars")
@@ -50,8 +50,7 @@ struct ScheduleGenerateView: View {
                 InfoRow(label: "Tasks with deadlines", value: "\(stats.withDeadlines)")
             }
             .padding()
-            .background(.gray.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(.gray.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
 
             Spacer()
@@ -156,8 +155,7 @@ struct ScheduleGenerateView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal)
         }
     }

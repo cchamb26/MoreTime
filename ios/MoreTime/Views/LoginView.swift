@@ -31,14 +31,12 @@ struct LoginView: View {
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                         .padding()
-                        .background(.gray.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
 
                     SecureField("Password", text: $password)
                         .textContentType(.password)
                         .padding()
-                        .background(.gray.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.horizontal)
 
@@ -116,8 +114,7 @@ struct RegisterView: View {
                         TextField("Full Name", text: $name)
                             .textContentType(.name)
                             .padding()
-                            .background(.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
 
                         TextField("Email", text: $email)
                             .textContentType(.emailAddress)
@@ -125,20 +122,17 @@ struct RegisterView: View {
                             .textInputAutocapitalization(.never)
                             .keyboardType(.emailAddress)
                             .padding()
-                            .background(.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
 
                         SecureField("Password (8+ characters)", text: $password)
                             .textContentType(.newPassword)
                             .padding()
-                            .background(.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
 
                         SecureField("Confirm Password", text: $confirmPassword)
                             .textContentType(.newPassword)
                             .padding()
-                            .background(.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .background(.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .padding(.horizontal)
 

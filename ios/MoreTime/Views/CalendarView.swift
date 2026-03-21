@@ -281,7 +281,6 @@ struct ScheduleBlockCard: View {
             }
         }
         .padding(12)
-        .background(.gray.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.gray.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 }

@@ -23,9 +23,6 @@ final class AuthStore {
         )
         #else
         isAuthenticated = api.isAuthenticated
-        if isAuthenticated {
-            Task { await fetchProfile() }
-        }
         #endif
     }
 

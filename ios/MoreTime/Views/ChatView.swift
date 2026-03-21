@@ -118,9 +118,8 @@ struct ChatBubbleView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(bubble.role == "user" ? Color.primary : Color.gray.opacity(0.12))
                 .foregroundStyle(bubble.role == "user" ? Color(.systemBackground) : Color.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .background(bubble.role == "user" ? Color.primary : Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
 
             if bubble.role == "assistant" { Spacer(minLength: 60) }
         }
@@ -143,8 +142,7 @@ struct SuggestionChip: View {
                 .font(.caption)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(.gray.opacity(0.1))
-                .clipShape(Capsule())
+                .background(.gray.opacity(0.1), in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -164,8 +162,7 @@ struct TypingIndicator: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(.gray.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .background(.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
         .onAppear {
             withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
                 phase = .pi * 2

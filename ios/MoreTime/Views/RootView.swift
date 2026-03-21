@@ -13,6 +13,11 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut, value: authStore.isAuthenticated)
+        .task {
+            if authStore.isAuthenticated {
+                await authStore.fetchProfile()
+            }
+        }
         .errorBanner(errorLogger.currentError) {
             errorLogger.dismissCurrent()
         }

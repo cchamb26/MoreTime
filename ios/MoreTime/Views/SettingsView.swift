@@ -81,9 +81,8 @@ struct SettingsView: View {
                                     .font(.caption.monospacedDigit())
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 2)
-                                    .background(.red.opacity(0.15))
                                     .foregroundStyle(.red)
-                                    .clipShape(Capsule())
+                                    .background(.red.opacity(0.15), in: Capsule())
                             }
                         }
                     }

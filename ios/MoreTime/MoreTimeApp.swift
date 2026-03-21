@@ -8,7 +8,7 @@ struct MoreTimeApp: App {
     @State private var scheduleStore = ScheduleStore()
     @State private var chatStore = ChatStore()
 
-    var sharedModelContainer: ModelContainer = {
+    static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             CachedTask.self,
             CachedScheduleBlock.self,
@@ -29,6 +29,6 @@ struct MoreTimeApp: App {
                 .environment(scheduleStore)
                 .environment(chatStore)
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(Self.sharedModelContainer)
     }
 }
