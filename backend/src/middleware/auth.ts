@@ -16,7 +16,16 @@ declare global {
   }
 }
 
+const DEV_USER_ID = 'dev-bypass-user';
+const DEV_EMAIL = 'dev@moretime.local';
+
 export function authGuard(req: Request, _res: Response, next: NextFunction): void {
+  // Dev bypass: skip JWT when DEV_BYPASS_AUTH is set
+  if (process.env.DEV_BYPASS_AUTH === 'true') {
+    req.user = { userId: DEV_USER_ID, email: DEV_EMAIL };
+    return next();
+  }
+
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return next(new UnauthorizedError('Missing or invalid Authorization header'));

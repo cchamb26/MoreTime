@@ -10,10 +10,23 @@ final class AuthStore {
     private let api = APIClient.shared
 
     init() {
+        #if DEBUG
+        // Dev bypass: skip auth so you can test everything else
+        isAuthenticated = true
+        currentUser = UserProfile(
+            id: "dev-bypass-user",
+            email: "dev@moretime.local",
+            name: "Dev User",
+            timezone: "America/New_York",
+            preferences: nil,
+            createdAt: nil
+        )
+        #else
         isAuthenticated = api.isAuthenticated
         if isAuthenticated {
             Task { await fetchProfile() }
         }
+        #endif
     }
 
     func register(email: String, name: String, password: String) async {

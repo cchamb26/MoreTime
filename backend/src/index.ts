@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middleware/errorHandler.js';
+import { prisma } from './utils/db.js';
 
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
@@ -46,6 +47,25 @@ app.use('/voice', aiLimiter, voiceRoutes);
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Dev bypass: seed the dev user on startup so all authed routes work
+if (process.env.DEV_BYPASS_AUTH === 'true') {
+  const DEV_USER_ID = 'dev-bypass-user';
+  prisma.user
+    .upsert({
+      where: { id: DEV_USER_ID },
+      update: {},
+      create: {
+        id: DEV_USER_ID,
+        email: 'dev@moretime.local',
+        name: 'Dev User',
+        passwordHash: 'bypass',
+        timezone: 'America/New_York',
+      },
+    })
+    .then(() => console.log('Dev bypass auth enabled — dev user seeded'))
+    .catch((err: unknown) => console.error('Failed to seed dev user:', err));
+}
 
 // Error handler (must be last)
 app.use(errorHandler);
