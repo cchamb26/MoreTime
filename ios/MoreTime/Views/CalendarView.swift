@@ -66,7 +66,7 @@ struct CalendarView: View {
 
                 // Calendar grid
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 4) {
-                    ForEach(days, id: \.self) { date in
+                    ForEach(Array(days.enumerated()), id: \.offset) { index, date in
                         if let date {
                             let dateKey = Self.dayKeyFormatter.string(from: date)
                             CalendarDayCell(
