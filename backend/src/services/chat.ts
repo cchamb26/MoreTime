@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getSupabase } from '../utils/supabase.js';
 import { chatCompletion } from './ai.js';
+import { generateSchedule } from './scheduling.js';
 
 interface ChatResult {
   sessionId: string;
@@ -9,6 +10,7 @@ interface ChatResult {
     type: 'task_created' | 'schedule_query' | 'reschedule';
     data?: unknown;
   };
+  scheduleGenerated?: boolean;
 }
 
 async function buildSystemContext(userId: string): Promise<string> {
@@ -18,7 +20,7 @@ async function buildSystemContext(userId: string): Promise<string> {
   const todayStr = today.toISOString().slice(0, 10);
   const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().slice(0, 10);
 
-  const [tasksResult, blocksResult, userResult] = await Promise.all([
+  const [tasksResult, blocksResult, userResult, coursesResult] = await Promise.all([
     supabase
       .from('tasks')
       .select('*, courses:course_id(name)')
@@ -38,11 +40,16 @@ async function buildSystemContext(userId: string): Promise<string> {
       .select('name, timezone')
       .eq('id', userId)
       .single(),
+    supabase
+      .from('courses')
+      .select('id, name')
+      .eq('user_id', userId),
   ]);
 
   const tasks = tasksResult.data ?? [];
   const todayBlocks = blocksResult.data ?? [];
   const user = userResult.data;
+  const courses = coursesResult.data ?? [];
 
   const taskList = tasks
     .map((t: Record<string, unknown>) => {
@@ -59,6 +66,10 @@ async function buildSystemContext(userId: string): Promise<string> {
     })
     .join('\n');
 
+  const courseList = courses
+    .map((c: Record<string, unknown>) => `- "${c.name}" (id: ${c.id})`)
+    .join('\n');
+
   return `You are MoreTime, an AI study assistant helping ${user?.name ?? 'a student'} manage their academic schedule.
 Today is ${todayStr} (${user?.timezone ?? 'America/New_York'}).
 
@@ -68,17 +79,41 @@ ${taskList || '(No pending tasks)'}
 Today's schedule:
 ${scheduleList || '(Nothing scheduled today)'}
 
-You can help the student:
-1. Create tasks: When they describe an assignment, extract the details and respond with a JSON action block.
-2. Query schedule: Tell them what they should work on today/this week.
-3. Reschedule: When they ask to move blocks, describe the change.
-4. General study advice and motivation.
+Student's courses:
+${courseList || '(No courses yet)'}
 
-When the user describes a new task, include this in your response:
-<action type="task_created">{"title": "...", "courseId": null, "dueDate": "YYYY-MM-DDTHH:MM:SSZ", "estimatedHours": N, "priority": N}</action>
+---
+RULES — follow these exactly:
 
-When the user asks about their schedule, just respond naturally with the relevant information.
-Keep responses concise and helpful.`;
+1. **Detect tasks aggressively.** Whenever the user mentions ANY assignment, project, exam, quiz, paper, lab, presentation, homework, or deadline — even casually — you MUST emit an <action> block. Do NOT ask for confirmation first; just create it and tell the user you did.
+
+2. **Action block format** (include this EXACTLY as-is at the END of your message, after your natural-language reply):
+<action type="task_created">{"title": "...", "courseId": "..." or null, "dueDate": "YYYY-MM-DDTHH:MM:SSZ" or null, "estimatedHours": N, "priority": N, "description": "..."}</action>
+
+3. **Task titles must be specific and descriptive.** Include the course prefix/number and the deliverable type.
+   GOOD: "CS310 — Research Paper: Distributed Systems Survey"
+   GOOD: "MATH201 — Problem Set 7 (Ch. 12 Integrals)"
+   GOOD: "BIO150 — Lab Report: Enzyme Kinetics Experiment"
+   BAD: "Research Paper"  BAD: "Problem Set"  BAD: "Lab Report"
+
+4. **courseId**: Match the user's mention to a course from the list above. Use the course's UUID if it matches. Use null only if no course matches and the user didn't specify one.
+
+5. **estimatedHours**: Be realistic. Guidelines:
+   - Short homework / problem set: 1–3h
+   - Lab report or short paper (2–5 pages): 3–6h
+   - Midterm exam study: 6–12h
+   - Research paper (8+ pages): 10–20h
+   - Final exam study: 10–20h
+   - Group project: 8–15h per person
+   - Reading response / reflection: 1–2h
+
+6. **priority**: 1 = highest … 5 = lowest. Base it on due-date proximity and likely grade weight.
+
+7. **Schedule queries**: When the user asks what to work on or about their schedule, respond naturally using the task and schedule data above.
+
+8. **General chat**: For non-task conversation (motivation, study tips), just respond helpfully without an action block.
+
+Keep responses concise — 2–4 sentences of natural language, then the action block (if any).`;
 }
 
 export async function handleChatMessage(
@@ -128,7 +163,8 @@ export async function handleChatMessage(
 
   // Parse any action from response
   let action: ChatResult['action'];
-  const actionMatch = response.match(/<action type="(\w+)">(.+?)<\/action>/s);
+  let scheduleGenerated = false;
+  const actionMatch = response.match(/<action type="(\w+)">([\s\S]+?)<\/action>/);
   if (actionMatch) {
     const type = actionMatch[1] as 'task_created' | 'schedule_query' | 'reschedule';
     try {
@@ -150,6 +186,14 @@ export async function handleChatMessage(
           .single();
 
         action = { type, data: task };
+
+        // Auto-generate schedule so the new task appears on the calendar
+        try {
+          await generateSchedule(userId);
+          scheduleGenerated = true;
+        } catch (schedErr) {
+          console.error('Auto-schedule after chat task creation failed:', schedErr);
+        }
       } else {
         action = { type, data };
       }
@@ -158,7 +202,7 @@ export async function handleChatMessage(
     }
   }
 
-  const cleanResponse = response.replace(/<action[^>]*>.*?<\/action>/gs, '').trim();
+  const cleanResponse = response.replace(/<action[^>]*>[\s\S]*?<\/action>/g, '').trim();
 
-  return { sessionId: sid, response: cleanResponse, action };
+  return { sessionId: sid, response: cleanResponse, action, scheduleGenerated };
 }

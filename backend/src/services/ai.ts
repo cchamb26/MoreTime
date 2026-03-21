@@ -15,18 +15,46 @@ export async function extractTasksFromContent(
 ): Promise<ExtractedTask[]> {
   const client = getOpenAIClient();
 
-  const systemPrompt = `You are an academic document parser. Extract all assignments, projects, exams, and deadlines from the provided syllabus or document content.
+  const currentYear = new Date().getFullYear();
+  const systemPrompt = `You are an academic document parser. Extract ONLY concrete, submittable deliverables and scheduled assessments from the provided syllabus or document.
 
-For each item, extract:
-- title: The assignment/exam name
-- description: Brief description if available
-- dueDate: In ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ) if a specific date is given. Use the current academic year.
-- estimatedHours: Your estimate of hours needed (1-50 range)
-- priority: 1 (highest) to 5 (lowest), based on weight/importance
-- weight: The grade weight if specified (e.g., "15%")
+**EXTRACT these types:**
+- Assignments, homework, problem sets
+- Papers, essays, research projects
+- Exams (midterm, final, quizzes)
+- Lab reports, lab practicals
+- Presentations, group projects
+- Any other graded deliverable with a due date or exam date
 
-Return a JSON array. If no items are found, return an empty array.
-Only output valid JSON, no markdown fencing or extra text.`;
+**DO NOT extract:**
+- Attendance or participation (these are ongoing policies, not tasks)
+- Readings or "read chapter X" (unless a written response is due)
+- Class policies, office hours, grading breakdowns by themselves
+- Course objectives, learning outcomes, instructor info
+- Extra credit unless it has a concrete deliverable and date
+
+For each extracted item, return:
+- title: Specific and descriptive. Include the deliverable type and topic.
+  GOOD: "Problem Set 3 — Linear Transformations"  GOOD: "Midterm Exam — Chapters 1–6"
+  BAD: "PS3"  BAD: "Midterm"
+- description: Brief description if the document provides details
+- dueDate: ISO 8601 (YYYY-MM-DDTHH:MM:SSZ). Use the ${currentYear}–${currentYear + 1} academic year. If only a weekday is given (e.g. "due Friday of Week 5"), estimate the calendar date.
+- estimatedHours: Realistic estimate of student work time. Guidelines:
+    * Short homework / problem set: 1–3h
+    * Lab report (5–10 pages): 4–8h
+    * Short paper (2–5 pages): 3–6h
+    * Research paper (8+ pages): 10–20h
+    * Midterm study: 6–12h
+    * Final exam study: 10–20h
+    * Group project (per person): 8–15h
+    * Quiz study: 1–3h
+    * Presentation prep: 3–6h
+    * Reading response / reflection: 1–2h
+- priority: 1 (highest) to 5 (lowest), based on grade weight and proximity
+- weight: The grade weight if stated (e.g. "15%")
+
+Return JSON: { "tasks": [ ... ] }. If nothing qualifies, return { "tasks": [] }.
+Output ONLY valid JSON — no markdown fencing, no extra text.`;
 
   const response = await client.chat.completions.create({
     model: getDeploymentName(),

@@ -150,6 +150,7 @@ struct ChatResponse: Codable {
     let sessionId: String
     let response: String
     let action: ChatAction?
+    let scheduleGenerated: Bool?
 
     struct ChatAction: Codable {
         let type: String

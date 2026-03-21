@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ChatView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(TaskStore.self) private var taskStore
+    @Environment(ScheduleStore.self) private var scheduleStore
     @State private var inputText = ""
     @State private var showVoice = false
     @FocusState private var isInputFocused: Bool
@@ -103,7 +105,19 @@ struct ChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         inputText = ""
-        Task { await chatStore.sendMessage(text) }
+        Task {
+            await chatStore.sendMessage(text)
+            if chatStore.lastActionType == "task_created" {
+                await taskStore.fetchTasks()
+                if chatStore.didGenerateSchedule {
+                    let now = Date()
+                    let cal = Calendar.current
+                    let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
+                    let end = cal.date(byAdding: .month, value: 1, to: start)!
+                    await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                }
+            }
+        }
     }
 }
 
@@ -128,6 +142,8 @@ struct ChatBubbleView: View {
 
 struct SuggestionChip: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(TaskStore.self) private var taskStore
+    @Environment(ScheduleStore.self) private var scheduleStore
     let text: String
 
     init(_ text: String) {
@@ -136,7 +152,19 @@ struct SuggestionChip: View {
 
     var body: some View {
         Button {
-            Task { await chatStore.sendMessage(text) }
+            Task {
+                await chatStore.sendMessage(text)
+                if chatStore.lastActionType == "task_created" {
+                    await taskStore.fetchTasks()
+                    if chatStore.didGenerateSchedule {
+                        let now = Date()
+                        let cal = Calendar.current
+                        let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
+                        let end = cal.date(byAdding: .month, value: 1, to: start)!
+                        await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+                    }
+                }
+            }
         } label: {
             Text(text)
                 .font(.caption)

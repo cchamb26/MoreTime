@@ -13,6 +13,8 @@ final class ChatStore {
     var sessionId: String?
     var isLoading = false
     var error: String?
+    var lastActionType: String?
+    var didGenerateSchedule = false
 
     private let api = APIClient.shared
     private let log = ErrorLogger.shared
@@ -24,6 +26,8 @@ final class ChatStore {
 
         isLoading = true
         error = nil
+        lastActionType = nil
+        didGenerateSchedule = false
         defer { isLoading = false }
 
         do {
@@ -31,6 +35,8 @@ final class ChatStore {
             let response: ChatResponse = try await api.request("POST", path: "/chat/message", body: body)
 
             sessionId = response.sessionId
+            lastActionType = response.action?.type
+            didGenerateSchedule = response.scheduleGenerated ?? false
             let assistantBubble = ChatBubble(role: "assistant", content: response.response, timestamp: Date())
             messages.append(assistantBubble)
             trimMessages()
@@ -43,6 +49,8 @@ final class ChatStore {
     func sendVoice(audioURL: URL) async {
         isLoading = true
         error = nil
+        lastActionType = nil
+        didGenerateSchedule = false
         defer { isLoading = false }
 
         do {
