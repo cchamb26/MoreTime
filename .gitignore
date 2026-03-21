@@ -152,3 +152,11 @@ ios/**/*.hmap
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+
+# AI related
+./claude
+
+# env files
+.env.example
+api-examples.sh
