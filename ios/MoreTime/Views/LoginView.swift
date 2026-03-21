@@ -67,7 +67,7 @@ struct LoginView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.primary)
-                    .foregroundStyle(.background)
+                    .foregroundStyle(Color(.systemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .disabled(email.isEmpty || password.isEmpty || authStore.isLoading)
 
@@ -168,7 +168,7 @@ struct RegisterView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.primary)
-                    .foregroundStyle(.background)
+                    .foregroundStyle(Color(.systemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .disabled(!passwordsMatch || name.isEmpty || email.isEmpty || password.count < 8 || authStore.isLoading)
                     .padding(.horizontal)

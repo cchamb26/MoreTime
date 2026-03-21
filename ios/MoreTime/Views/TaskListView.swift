@@ -11,71 +11,16 @@ struct TaskListView: View {
         NavigationStack {
             Group {
                 if taskStore.tasks.isEmpty && !taskStore.isLoading {
-                    ContentUnavailableView {
-                        Label("No Tasks", systemImage: "checklist")
-                    } description: {
-                        Text("Add tasks manually or upload a syllabus")
-                    } actions: {
-                        Button("Add Task") { showCreateSheet = true }
-                            .buttonStyle(.bordered)
-                    }
+                    emptyStateView
                 } else {
-                    List {
-                        ForEach(groupedTasks, id: \.0) { courseName, tasks in
-                            Section(courseName) {
-                                ForEach(tasks) { task in
-                                    NavigationLink(value: task) {
-                                        TaskRow(task: task)
-                                    }
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) {
-                                            Task { await taskStore.deleteTask(id: task.id) }
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
-                                    .swipeActions(edge: .leading) {
-                                        if task.status != "completed" {
-                                            Button {
-                                                Task { await taskStore.completeTask(id: task.id) }
-                                            } label: {
-                                                Label("Complete", systemImage: "checkmark")
-                                            }
-                                            .tint(.green)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    taskListContent
                 }
             }
             .navigationTitle("Tasks")
             .navigationDestination(for: TaskItem.self) { task in
                 TaskDetailView(task: task)
             }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showCreateSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-                ToolbarItem(placement: .secondaryAction) {
-                    Menu {
-                        Picker("Sort", selection: $sortBy) {
-                            Text("Due Date").tag("dueDate")
-                            Text("Priority").tag("priority")
-                            Text("Created").tag("createdAt")
-                        }
-                        Toggle("Show Completed", isOn: $showCompleted)
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                    }
-                }
-            }
+            .toolbar { toolbarItems }
             .sheet(isPresented: $showCreateSheet) {
                 TaskCreateView()
             }
@@ -84,6 +29,76 @@ struct TaskListView: View {
             }
             .onChange(of: sortBy) {
                 Task { await taskStore.fetchTasks(sortBy: sortBy) }
+            }
+        }
+    }
+
+    private var emptyStateView: some View {
+        ContentUnavailableView {
+            Label("No Tasks", systemImage: "checklist")
+        } description: {
+            Text("Add tasks manually or upload a syllabus")
+        } actions: {
+            Button("Add Task") { showCreateSheet = true }
+                .buttonStyle(.bordered)
+        }
+    }
+
+    private var taskListContent: some View {
+        List {
+            ForEach(groupedTasks, id: \.0) { courseName, tasks in
+                Section(courseName) {
+                    ForEach(tasks) { task in
+                        taskRow(for: task)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func taskRow(for task: TaskItem) -> some View {
+        NavigationLink(value: task) {
+            TaskRow(task: task)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                Task { await taskStore.deleteTask(id: task.id) }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if task.status != "completed" {
+                Button {
+                    Task { await taskStore.completeTask(id: task.id) }
+                } label: {
+                    Label("Complete", systemImage: "checkmark")
+                }
+                .tint(.green)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showCreateSheet = true
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+        ToolbarItem(placement: .secondaryAction) {
+            Menu {
+                Picker("Sort", selection: $sortBy) {
+                    Text("Due Date").tag("dueDate")
+                    Text("Priority").tag("priority")
+                    Text("Created").tag("createdAt")
+                }
+                Toggle("Show Completed", isOn: $showCompleted)
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease.circle")
             }
         }
     }

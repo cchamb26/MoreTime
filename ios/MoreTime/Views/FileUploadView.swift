@@ -19,87 +19,7 @@ struct FileUploadView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                if uploadedFiles.isEmpty && extractedTasks.isEmpty {
-                    // Upload prompt
-                    VStack(spacing: 16) {
-                        Spacer()
-
-                        Image(systemName: "doc.badge.plus")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary)
-
-                        Text("Upload Syllabus or Documents")
-                            .font(.headline)
-
-                        Text("Supports PDF, DOCX, TXT, and images")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Button {
-                            isPickerPresented = true
-                        } label: {
-                            Label("Choose Files", systemImage: "folder")
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.primary)
-                        .foregroundStyle(.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal, 40)
-
-                        Spacer()
-                    }
-                } else if !extractedTasks.isEmpty {
-                    // Extracted tasks preview
-                    List {
-                        Section("Extracted Tasks (\(extractedTasks.count))") {
-                            ForEach(extractedTasks) { task in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title)
-                                        .font(.subheadline.weight(.medium))
-                                    HStack {
-                                        if let due = task.dueDate {
-                                            Text(due.prefix(10))
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Text("\(task.estimatedHours, specifier: "%.1f")h")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                } else {
-                    // Upload progress / status
-                    List {
-                        Section("Uploaded Files") {
-                            ForEach(uploadedFiles) { file in
-                                HStack {
-                                    Image(systemName: iconForMime(file.mimeType))
-                                    VStack(alignment: .leading) {
-                                        Text(file.originalName)
-                                            .font(.subheadline)
-                                        Text(file.parseStatus.capitalized)
-                                            .font(.caption)
-                                            .foregroundStyle(file.parseStatus == "completed" ? .green : .secondary)
-                                    }
-                                    Spacer()
-                                    if file.parseStatus == "parsing" {
-                                        ProgressView()
-                                    } else if file.parseStatus == "completed" {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                }
+                contentView
 
                 if let error {
                     Text(error)
@@ -110,35 +30,7 @@ struct FileUploadView: View {
             }
             .navigationTitle("Upload Files")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-                if !uploadedFiles.isEmpty && extractedTasks.isEmpty {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            Task { await extractTasks() }
-                        } label: {
-                            if isExtracting {
-                                ProgressView()
-                            } else {
-                                Text("Extract Tasks")
-                            }
-                        }
-                        .disabled(isExtracting || uploadedFiles.allSatisfy { $0.parseStatus != "completed" })
-                    }
-                }
-                if !extractedTasks.isEmpty {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            Task {
-                                await taskStore.fetchTasks()
-                                dismiss()
-                            }
-                        }
-                    }
-                }
-            }
+            .toolbar { toolbarContent }
             .fileImporter(
                 isPresented: $isPickerPresented,
                 allowedContentTypes: [.pdf, .plainText, .png, .jpeg,
@@ -155,6 +47,135 @@ struct FileUploadView: View {
                         .padding(24)
                         .background(.regularMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if uploadedFiles.isEmpty && extractedTasks.isEmpty {
+            uploadPromptView
+        } else if !extractedTasks.isEmpty {
+            extractedTasksView
+        } else {
+            uploadedFilesView
+        }
+    }
+
+    private var uploadPromptView: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "doc.badge.plus")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+
+            Text("Upload Syllabus or Documents")
+                .font(.headline)
+
+            Text("Supports PDF, DOCX, TXT, and images")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                isPickerPresented = true
+            } label: {
+                Label("Choose Files", systemImage: "folder")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.primary)
+            .foregroundStyle(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 40)
+
+            Spacer()
+        }
+    }
+
+    private var extractedTasksView: some View {
+        List {
+            Section("Extracted Tasks (\(extractedTasks.count))") {
+                ForEach(extractedTasks) { task in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(task.title)
+                            .font(.subheadline.weight(.medium))
+                        HStack {
+                            if let due = task.dueDate {
+                                Text(due.prefix(10))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(task.estimatedHours, specifier: "%.1f")h")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private var uploadedFilesView: some View {
+        List {
+            Section("Uploaded Files") {
+                ForEach(uploadedFiles) { file in
+                    uploadedFileRow(file)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func uploadedFileRow(_ file: FileUploadResponse) -> some View {
+        HStack {
+            Image(systemName: iconForMime(file.mimeType))
+            VStack(alignment: .leading) {
+                Text(file.originalName)
+                    .font(.subheadline)
+                Text(file.parseStatus.capitalized)
+                    .font(.caption)
+                    .foregroundStyle(file.parseStatus == "completed" ? .green : .secondary)
+            }
+            Spacer()
+            if file.parseStatus == "parsing" {
+                ProgressView()
+            } else if file.parseStatus == "completed" {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Close") { dismiss() }
+        }
+        if !uploadedFiles.isEmpty && extractedTasks.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await extractTasks() }
+                } label: {
+                    if isExtracting {
+                        ProgressView()
+                    } else {
+                        Text("Extract Tasks")
+                    }
+                }
+                .disabled(isExtracting || uploadedFiles.allSatisfy { $0.parseStatus != "completed" })
+            }
+        }
+        if !extractedTasks.isEmpty {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    Task {
+                        await taskStore.fetchTasks()
+                        dismiss()
+                    }
                 }
             }
         }

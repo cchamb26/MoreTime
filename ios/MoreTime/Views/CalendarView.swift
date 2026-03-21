@@ -148,7 +148,7 @@ struct CalendarDayCell: View {
         VStack(spacing: 2) {
             Text("\(calendar.component(.day, from: date))")
                 .font(.system(.callout, design: .rounded, weight: isToday ? .bold : .regular))
-                .foregroundStyle(isSelected ? .background : isToday ? .primary : .primary.opacity(0.8))
+                .foregroundStyle(isSelected ? Color(.systemBackground) : isToday ? Color.primary : Color.primary.opacity(0.8))
 
             // Block indicators
             HStack(spacing: 2) {

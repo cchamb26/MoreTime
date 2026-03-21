@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 
+@MainActor
 @Observable
 final class AudioRecorder: NSObject {
     var isRecording = false

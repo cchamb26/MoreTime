@@ -46,7 +46,10 @@ struct CreateCourseRequest: Codable {
 
 // MARK: - Task
 
-struct TaskItem: Codable, Identifiable {
+struct TaskItem: Codable, Identifiable, Hashable {
+    static func == (lhs: TaskItem, rhs: TaskItem) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
     let id: String
     var courseId: String?
     var title: String

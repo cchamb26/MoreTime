@@ -32,7 +32,7 @@ struct VoiceInputView: View {
                         .overlay {
                             Image(systemName: recorder.isRecording ? "stop.fill" : "mic.fill")
                                 .font(.title)
-                                .foregroundStyle(recorder.isRecording ? .white : .background)
+                                .foregroundStyle(recorder.isRecording ? Color.white : Color(.systemBackground))
                         }
                         .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
                 }
@@ -115,7 +115,7 @@ struct WaveformView: View {
         HStack(spacing: 3) {
             ForEach(0..<barCount, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(isActive ? .primary : .secondary.opacity(0.3))
+                    .fill(isActive ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary.opacity(0.3)))
                     .frame(width: 3, height: barHeight(for: i))
                     .animation(.easeInOut(duration: 0.1), value: level)
             }

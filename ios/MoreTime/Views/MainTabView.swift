@@ -7,21 +7,21 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("Calendar", systemImage: "calendar", value: 0) {
-                CalendarView()
-            }
+            CalendarView()
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag(0)
 
-            Tab("Tasks", systemImage: "checklist", value: 1) {
-                TaskListView()
-            }
+            TaskListView()
+                .tabItem { Label("Tasks", systemImage: "checklist") }
+                .tag(1)
 
-            Tab("Chat", systemImage: "message", value: 2) {
-                ChatView()
-            }
+            ChatView()
+                .tabItem { Label("Chat", systemImage: "message") }
+                .tag(2)
 
-            Tab("Settings", systemImage: "gear", value: 3) {
-                SettingsView()
-            }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gear") }
+                .tag(3)
         }
         .tint(.primary)
         .task {

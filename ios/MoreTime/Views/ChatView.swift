@@ -50,7 +50,7 @@ struct ChatView: View {
                     }
                     .onChange(of: chatStore.messages.count) {
                         withAnimation {
-                            proxy.scrollTo(chatStore.messages.last?.id ?? "typing", anchor: .bottom)
+                            proxy.scrollTo(chatStore.messages.last.map { $0.id as AnyHashable } ?? ("typing" as AnyHashable), anchor: .bottom)
                         }
                     }
                 }
@@ -118,8 +118,8 @@ struct ChatBubbleView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(bubble.role == "user" ? .primary : .gray.opacity(0.12))
-                .foregroundStyle(bubble.role == "user" ? .background : .primary)
+                .background(bubble.role == "user" ? Color.primary : Color.gray.opacity(0.12))
+                .foregroundStyle(bubble.role == "user" ? Color(.systemBackground) : Color.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 18))
 
             if bubble.role == "assistant" { Spacer(minLength: 60) }
