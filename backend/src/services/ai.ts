@@ -34,7 +34,7 @@ Only output valid JSON, no markdown fencing or extra text.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: `Extract tasks from this document:\n\n${content.slice(0, 15000)}` },
     ],
-    temperature: 0.1,
+
     max_completion_tokens: 4000,
     response_format: { type: 'json_object' },
   });
@@ -60,7 +60,7 @@ export async function chatCompletion(
   const response = await client.chat.completions.create({
     model: getDeploymentName(),
     messages,
-    temperature: 0.7,
+
     max_completion_tokens: 2000,
   });
 
@@ -96,7 +96,7 @@ Rules:
       },
       { role: 'user', content: prompt },
     ],
-    temperature: 0.2,
+
     max_completion_tokens: 8000,
     response_format: { type: 'json_object' },
   });
