@@ -104,6 +104,18 @@ export async function generateSchedule(userId: string): Promise<ScheduleResult> 
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // Auto-escalate priority of overdue tasks
+  for (const task of tasks) {
+    if (task.due_date && new Date(task.due_date as string) < today && (task.priority as number) > 1) {
+      const newPriority = 1;
+      await supabase
+        .from('tasks')
+        .update({ priority: newPriority })
+        .eq('id', task.id);
+      task.priority = newPriority;
+    }
+  }
   const todayStr = today.toISOString().slice(0, 10);
   const maxDate = new Date(today);
   maxDate.setDate(maxDate.getDate() + 30);
@@ -132,6 +144,7 @@ export async function generateSchedule(userId: string): Promise<ScheduleResult> 
   const taskDescriptions = tasks.map((t: Record<string, unknown>) => ({
     taskId: t.id,
     title: t.title,
+    description: t.description || '',
     course: (t.courses as Record<string, unknown> | null)?.name ?? 'General',
     dueDate: t.due_date ? (t.due_date as string).slice(0, 10) : 'No deadline',
     priority: t.priority,
@@ -205,6 +218,7 @@ Generate an optimal study schedule. Spread work evenly, prioritize high-priority
         start_time: block.startTime,
         end_time: block.endTime,
         is_locked: false,
+        label: block.label || null,
       })
       .select()
       .single();

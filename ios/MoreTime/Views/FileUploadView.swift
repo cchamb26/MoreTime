@@ -12,6 +12,7 @@ struct FileUploadView: View {
     @State private var isUploading = false
     @State private var isExtracting = false
     @State private var extractedTasks: [TaskItem] = []
+    @State private var detectedType: String?
     @State private var error: String?
 
     private let api = APIClient.shared
@@ -70,12 +71,18 @@ struct FileUploadView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
 
-            Text("Upload Syllabus or Documents")
+            Text("Upload Files")
                 .font(.headline)
 
-            Text("Supports PDF, DOCX, TXT, and images")
+            Text("Upload a syllabus to extract all assignments, or an assignment brief to break it into subtasks.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Text("Supports PDF, DOCX, TXT, and images")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             Button {
                 isPickerPresented = true
@@ -96,7 +103,7 @@ struct FileUploadView: View {
 
     private var extractedTasksView: some View {
         List {
-            Section("Extracted Tasks (\(extractedTasks.count))") {
+            Section(detectedType == "assignment" ? "Subtasks (\(extractedTasks.count))" : "Extracted Tasks (\(extractedTasks.count))") {
                 ForEach(extractedTasks) { task in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(task.title)
@@ -281,6 +288,7 @@ struct FileUploadView: View {
                 group.addTask {
                     do {
                         let result: ExtractTasksResponse = try await self.api.request("POST", path: "/files/\(file.id)/extract-tasks")
+                        await MainActor.run { self.detectedType = result.documentType }
                         return .success(result.tasks)
                     } catch {
                         return .failure(error)

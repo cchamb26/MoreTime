@@ -59,6 +59,23 @@ router.get('/', validate(querySchema, 'query'), async (req: Request, res: Respon
     const { data, error } = await query;
     if (error) throw error;
 
+    // Auto-escalate overdue tasks to priority 1
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const overdueIds: string[] = [];
+    for (const row of data ?? []) {
+      if (row.due_date && new Date(row.due_date as string) < now && row.status !== 'completed' && (row.priority as number) > 1) {
+        row.priority = 1;
+        overdueIds.push(row.id as string);
+      }
+    }
+    if (overdueIds.length > 0) {
+      await supabase
+        .from('tasks')
+        .update({ priority: 1 })
+        .in('id', overdueIds);
+    }
+
     const tasks = (data ?? []).map((row: Record<string, unknown>) => {
       const { courses, user_id, ...rest } = row as Record<string, unknown>;
       return { ...toCamel(rest), course: courses ? toCamel(courses) : null };

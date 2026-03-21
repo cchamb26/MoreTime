@@ -194,6 +194,7 @@ export interface ScheduleBlockInput {
   date: string;
   startTime: string;
   endTime: string;
+  label?: string;
 }
 
 export async function generateScheduleBlocks(prompt: string): Promise<ScheduleBlockInput[]> {
@@ -213,7 +214,8 @@ Rules:
 - Respect estimated hours — split across multiple days if needed
 - Include short breaks between blocks (at least 15 min)
 - Schedule in blocks of 30min to 3hrs max
-- Output strict JSON: { "blocks": [{ "taskId": "", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM" }] }
+- IMPORTANT: Each block MUST include a "label" field — a short, specific description of what to work on during that block (e.g. "Read chapters 3-4 and take notes", "Draft introduction paragraph", "Solve problems 1-10"). Do NOT just repeat the task title.
+- Output strict JSON: { "blocks": [{ "taskId": "", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "label": "" }] }
 - Only output valid JSON, no markdown or extra text`,
       },
       { role: 'user', content: prompt },

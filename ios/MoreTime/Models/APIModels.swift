@@ -174,6 +174,7 @@ struct FileUploadResponse: Codable, Identifiable {
 struct ExtractTasksResponse: Codable {
     let extractedCount: Int
     let tasks: [TaskItem]
+    let documentType: String?
 }
 
 // MARK: - Voice
