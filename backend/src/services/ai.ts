@@ -80,6 +80,100 @@ Output ONLY valid JSON — no markdown fencing, no extra text.`;
   }
 }
 
+export async function breakdownAssignment(
+  content: string,
+  dueDate: string | null,
+): Promise<ExtractedTask[]> {
+  const client = getOpenAIClient();
+  const currentYear = new Date().getFullYear();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const deadlineContext = dueDate
+    ? `The assignment is due ${dueDate}. Today is ${todayStr}. Spread the subtasks so they finish 1 day before the deadline.`
+    : `No specific due date given. Today is ${todayStr}. Spread subtasks over the next 2 weeks.`;
+
+  const systemPrompt = `You are an academic project planner. Given assignment guidelines or a project description, break the work into small, actionable subtasks that a student can complete in 1–4 hour sessions.
+
+${deadlineContext}
+
+For each subtask, return:
+- title: Specific and actionable. Start with a verb.
+  GOOD: "Read and annotate 3 source papers on distributed systems"
+  GOOD: "Write introduction and thesis statement (500 words)"
+  GOOD: "Build database schema and seed test data"
+  BAD: "Research"  BAD: "Writing"  BAD: "Setup"
+- description: What specifically to accomplish in this chunk
+- dueDate: ISO 8601 (YYYY-MM-DDTHH:MM:SSZ). Space subtasks evenly between now and the deadline. Earlier subtasks = research/planning, later = drafting/polishing/review.
+- estimatedHours: Realistic for that subtask (1–4h each). Guidelines:
+    * Research / reading: 1–2h per session
+    * Outlining / planning: 1–2h
+    * Writing a section: 2–4h
+    * Coding a component: 2–4h
+    * Testing / debugging: 1–3h
+    * Review / revision: 1–2h
+    * Presentation prep: 2–3h
+- priority: 1 (highest) to 5 (lowest). Earlier subtasks get higher priority.
+
+Return JSON: { "tasks": [ ... ] }. Order subtasks chronologically.
+Output ONLY valid JSON — no markdown fencing, no extra text.`;
+
+  const response = await client.chat.completions.create({
+    model: getDeploymentName(),
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Break down this assignment into subtasks:\n\n${content.slice(0, 15000)}` },
+    ],
+    max_completion_tokens: 4000,
+    response_format: { type: 'json_object' },
+  });
+
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed) ? parsed : parsed.tasks || parsed.subtasks || [];
+    return items.filter((item: ExtractedTask) => item.title);
+  } catch {
+    console.error('Failed to parse AI assignment breakdown response');
+    return [];
+  }
+}
+
+export async function detectDocumentType(
+  content: string,
+): Promise<'syllabus' | 'assignment'> {
+  const client = getOpenAIClient();
+
+  const response = await client.chat.completions.create({
+    model: getDeploymentName(),
+    messages: [
+      {
+        role: 'system',
+        content: `Classify the following academic document as either "syllabus" or "assignment".
+
+A SYLLABUS contains: course schedule, multiple assignments/exams listed, grading policies, instructor info, weekly topics.
+An ASSIGNMENT contains: a single project/paper/lab description, specific requirements, rubric, submission instructions for one deliverable.
+
+Return JSON: { "type": "syllabus" } or { "type": "assignment" }
+Output ONLY valid JSON.`,
+      },
+      { role: 'user', content: content.slice(0, 5000) },
+    ],
+    max_completion_tokens: 50,
+    response_format: { type: 'json_object' },
+  });
+
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return 'syllabus';
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.type === 'assignment' ? 'assignment' : 'syllabus';
+  } catch {
+    return 'syllabus';
+  }
+}
+
 export async function chatCompletion(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
 ): Promise<string> {

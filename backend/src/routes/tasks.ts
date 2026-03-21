@@ -161,6 +161,15 @@ router.patch(
 
       if (error) throw new NotFoundError('Task', id);
 
+      // When a task is completed, remove its schedule blocks
+      if (req.body.status === 'completed') {
+        await supabase
+          .from('schedule_blocks')
+          .delete()
+          .eq('task_id', id)
+          .eq('user_id', req.user!.userId);
+      }
+
       const { courses, user_id, ...rest } = data as Record<string, unknown>;
       res.json({ ...toCamel(rest), course: courses ? toCamel(courses) : null });
     } catch (err) {

@@ -6,7 +6,7 @@ import { getSupabase } from '../utils/supabase.js';
 import { authGuard } from '../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { parseFile } from '../services/fileParser.js';
-import { extractTasksFromContent } from '../services/ai.js';
+import { extractTasksFromContent, detectDocumentType, breakdownAssignment } from '../services/ai.js';
 import { toCamel } from '../utils/transform.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
@@ -159,7 +159,12 @@ router.post('/:id/extract-tasks', async (req: Request, res: Response, next: Next
     if (error || !file) throw new NotFoundError('FileUpload', id);
     if (!file.parsed_content) throw new ValidationError('File has not been parsed yet');
 
-    const extracted = await extractTasksFromContent(file.parsed_content, file.course_id);
+    const docType = await detectDocumentType(file.parsed_content);
+    const dueDate = req.body.dueDate ?? null;
+
+    const extracted = docType === 'assignment'
+      ? await breakdownAssignment(file.parsed_content, dueDate)
+      : await extractTasksFromContent(file.parsed_content, file.course_id);
 
     const tasks = [];
     for (const item of extracted) {
@@ -183,7 +188,7 @@ router.post('/:id/extract-tasks', async (req: Request, res: Response, next: Next
       }
     }
 
-    res.status(201).json({ extractedCount: tasks.length, tasks });
+    res.status(201).json({ extractedCount: tasks.length, tasks, documentType: docType });
   } catch (err) {
     next(err);
   }

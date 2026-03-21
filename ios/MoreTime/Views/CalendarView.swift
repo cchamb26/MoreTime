@@ -256,46 +256,88 @@ struct DayDetailView: View {
 
 struct ScheduleBlockCard: View {
     let block: ScheduleBlock
+    @State private var isExpanded = false
+
+    private var durationMinutes: Int {
+        let parts = { (s: String) -> Int in
+            let p = s.split(separator: ":").compactMap { Int($0) }
+            return (p.first ?? 0) * 60 + (p.last ?? 0)
+        }
+        return parts(block.endTime) - parts(block.startTime)
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Time
-            VStack(alignment: .trailing) {
-                Text(block.startTime)
-                    .font(.caption.monospacedDigit())
-                Text(block.endTime)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 44)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .trailing) {
+                    Text(block.startTime)
+                        .font(.caption.monospacedDigit())
+                    Text(block.endTime)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 44)
 
-            // Color bar
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hex: block.task?.course?.color ?? "#6B7280"))
-                .frame(width: 4)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(hex: block.task?.course?.color ?? "#6B7280"))
+                    .frame(width: 4)
 
-            // Content
-            VStack(alignment: .leading, spacing: 2) {
-                Text(block.task?.title ?? block.label ?? "Block")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(block.task?.title ?? block.label ?? "Block")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(isExpanded ? nil : 1)
 
-                if let courseName = block.task?.course?.name {
-                    Text(courseName)
+                    if let courseName = block.task?.course?.name {
+                        Text(courseName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if block.isLocked {
+                    Image(systemName: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
+            .padding(12)
 
-            Spacer()
+            if isExpanded {
+                Divider()
+                    .padding(.horizontal, 12)
 
-            if block.isLocked {
-                Image(systemName: "lock.fill")
+                VStack(alignment: .leading, spacing: 8) {
+                    if let label = block.label, !label.isEmpty {
+                        Text(label)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                    }
+
+                    HStack(spacing: 16) {
+                        Label("\(durationMinutes) min", systemImage: "clock")
+                        if let p = block.task?.priority {
+                            Label("P\(p)", systemImage: "flag")
+                        }
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(12)
         .background(.gray.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+        }
     }
 }
