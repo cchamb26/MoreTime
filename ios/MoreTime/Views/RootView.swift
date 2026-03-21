@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AuthStore.self) private var authStore
+    private let errorLogger = ErrorLogger.shared
 
     var body: some View {
         Group {
@@ -12,5 +13,8 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut, value: authStore.isAuthenticated)
+        .errorBanner(errorLogger.currentError) {
+            errorLogger.dismissCurrent()
+        }
     }
 }

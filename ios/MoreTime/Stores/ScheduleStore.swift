@@ -9,6 +9,7 @@ final class ScheduleStore {
     var lastGenerateResult: GenerateScheduleResponse?
 
     private let api = APIClient.shared
+    private let log = ErrorLogger.shared
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -29,6 +30,7 @@ final class ScheduleStore {
             blocks = try await api.request("GET", path: "/schedule", query: query)
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "fetchBlocks")
         }
     }
 
@@ -41,7 +43,6 @@ final class ScheduleStore {
             let result: GenerateScheduleResponse = try await api.request("POST", path: "/schedule/generate")
             lastGenerateResult = result
 
-            // Refresh blocks for current month
             let now = Date()
             let calendar = Calendar.current
             let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
@@ -49,6 +50,7 @@ final class ScheduleStore {
             await fetchBlocks(startDate: start, endDate: end)
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "generateSchedule")
         }
     }
 
@@ -59,6 +61,7 @@ final class ScheduleStore {
             return block
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "createBlock")
             return nil
         }
     }
@@ -70,6 +73,7 @@ final class ScheduleStore {
             return true
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "deleteBlock")
             return false
         }
     }

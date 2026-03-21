@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showCourseManagement = false
     @State private var showFileUpload = false
     @State private var showLockedBlocks = false
+    @State private var showDebugLog = false
 
     var body: some View {
         NavigationStack {
@@ -67,6 +68,30 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Debug") {
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        HStack {
+                            Label("Error Log", systemImage: "ladybug")
+                            Spacer()
+                            let count = ErrorLogger.shared.entries.count
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(.caption.monospacedDigit())
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(.red.opacity(0.15))
+                                    .foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+
+                    LabeledContent("API", value: APIClient.shared.baseURL)
+                        .font(.caption)
+                }
+
                 Section {
                     Button(role: .destructive) {
                         Task { await authStore.logout() }
@@ -84,6 +109,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showLockedBlocks) {
                 LockedBlocksView()
+            }
+            .sheet(isPresented: $showDebugLog) {
+                DebugLogView()
             }
         }
     }

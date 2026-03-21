@@ -8,6 +8,7 @@ final class TaskStore {
     var error: String?
 
     private let api = APIClient.shared
+    private let log = ErrorLogger.shared
 
     // MARK: - Tasks
 
@@ -24,6 +25,7 @@ final class TaskStore {
             tasks = try await api.request("GET", path: "/tasks", query: query)
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "fetchTasks")
         }
     }
 
@@ -34,6 +36,7 @@ final class TaskStore {
             return task
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "createTask")
             return nil
         }
     }
@@ -47,6 +50,7 @@ final class TaskStore {
             return task
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "updateTask")
             return nil
         }
     }
@@ -58,6 +62,7 @@ final class TaskStore {
             return true
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "deleteTask")
             return false
         }
     }
@@ -76,6 +81,7 @@ final class TaskStore {
             courses = try await api.request("GET", path: "/courses")
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "fetchCourses")
         }
     }
 
@@ -87,6 +93,7 @@ final class TaskStore {
             return course
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "createCourse")
             return nil
         }
     }
@@ -98,6 +105,7 @@ final class TaskStore {
             return true
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "deleteCourse")
             return false
         }
     }

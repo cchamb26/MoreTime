@@ -15,9 +15,7 @@ final class ChatStore {
     var error: String?
 
     private let api = APIClient.shared
-
-    /// Maximum number of messages kept in memory.
-    /// Older messages are dropped from the front once this limit is exceeded.
+    private let log = ErrorLogger.shared
     private let maxMessages = 200
 
     func sendMessage(_ text: String) async {
@@ -38,6 +36,7 @@ final class ChatStore {
             trimMessages()
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ChatStore", operation: "sendMessage")
         }
     }
 
@@ -47,7 +46,6 @@ final class ChatStore {
         defer { isLoading = false }
 
         do {
-            // Read file data off the main thread to avoid blocking UI
             let data = try await Task.detached {
                 try Data(contentsOf: audioURL)
             }.value
@@ -74,6 +72,7 @@ final class ChatStore {
             trimMessages()
         } catch {
             self.error = error.localizedDescription
+            log.log(error, source: "ChatStore", operation: "sendVoice")
         }
     }
 

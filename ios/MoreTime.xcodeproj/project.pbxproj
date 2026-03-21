@@ -31,6 +31,9 @@
 		A10000022 /* VoiceInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022 /* VoiceInputView.swift */; };
 		A10000023 /* ColorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023 /* ColorExtension.swift */; };
 		A10000024 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000024 /* Assets.xcassets */; };
+		A10000025 /* ErrorLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000025 /* ErrorLogger.swift */; };
+		A10000026 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000026 /* ErrorBanner.swift */; };
+		A10000027 /* DebugLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000027 /* DebugLogView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +61,9 @@
 		B10000022 /* VoiceInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputView.swift; sourceTree = "<group>"; };
 		B10000023 /* ColorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorExtension.swift; sourceTree = "<group>"; };
 		B10000024 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000025 /* ErrorLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorLogger.swift; sourceTree = "<group>"; };
+		B10000026 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
+		B10000027 /* DebugLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogView.swift; sourceTree = "<group>"; };
 		C10000001 /* MoreTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MoreTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -109,6 +115,7 @@
 				B10000004 /* APIClient.swift */,
 				B10000005 /* AudioRecorder.swift */,
 				B10000006 /* KeychainHelper.swift */,
+				B10000025 /* ErrorLogger.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
