@@ -169,6 +169,22 @@ router.patch(
   },
 );
 
+router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+
+    const { count, error } = await supabase
+      .from('tasks')
+      .delete({ count: 'exact' })
+      .eq('user_id', req.user!.userId);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;

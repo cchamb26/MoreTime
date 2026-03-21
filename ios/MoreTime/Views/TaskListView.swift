@@ -6,6 +6,7 @@ struct TaskListView: View {
     @State private var sortBy = "dueDate"
     @State private var filterCourseId: String?
     @State private var showCompleted = false
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,14 @@ struct TaskListView: View {
             .toolbar { toolbarItems }
             .sheet(isPresented: $showCreateSheet) {
                 TaskCreateView()
+            }
+            .alert("Clear All Tasks", isPresented: $showClearConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    Task { await taskStore.clearAllTasks() }
+                }
+            } message: {
+                Text("This will permanently delete all your tasks and any associated schedule blocks. This cannot be undone.")
             }
             .refreshable {
                 await taskStore.fetchTasks(sortBy: sortBy)
@@ -97,6 +106,11 @@ struct TaskListView: View {
                     Text("Created").tag("createdAt")
                 }
                 Toggle("Show Completed", isOn: $showCompleted)
+                Divider()
+                Button("Clear All Tasks", role: .destructive) {
+                    showClearConfirm = true
+                }
+                .disabled(taskStore.tasks.isEmpty)
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
             }

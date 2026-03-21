@@ -74,6 +74,19 @@ final class TaskStore {
         ))
     }
 
+    func clearAllTasks() async -> Int {
+        do {
+            struct ClearResponse: Decodable { let removed: Int }
+            let result: ClearResponse = try await api.request("DELETE", path: "/tasks/clear")
+            tasks.removeAll()
+            return result.removed
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "clearAllTasks")
+            return 0
+        }
+    }
+
     // MARK: - Courses
 
     func fetchCourses() async {
