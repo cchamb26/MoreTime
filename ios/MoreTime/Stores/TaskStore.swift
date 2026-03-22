@@ -91,8 +91,7 @@ final class TaskStore {
 
     func clearAllTasks() async -> Int {
         do {
-            struct ClearResponse: Decodable { let removed: Int }
-            let result: ClearResponse = try await api.request("DELETE", path: "/tasks/clear")
+            let result: TasksRemovedCountResponse = try await api.request("DELETE", path: "/tasks/clear")
             tasks.removeAll()
             await invokeScheduleRefreshCallback()
             return result.removed
@@ -101,6 +100,42 @@ final class TaskStore {
             log.log(error, source: "TaskStore", operation: "clearAllTasks")
             return 0
         }
+    }
+
+    /// Deletes tasks whose due time falls on this **local** calendar day (same rule as the calendar “Due” section).
+    func deleteTasksDueOnLocalDay(_ date: Date) async -> Int {
+        error = nil
+        let (startISO, endISO) = Self.isoRangeForLocalDay(date)
+
+        do {
+            let result: TasksRemovedCountResponse = try await api.request(
+                "DELETE",
+                path: "/tasks/due-in-day",
+                query: ["start": startISO, "end": endISO]
+            )
+            await fetchTasks()
+            await invokeScheduleRefreshCallback()
+            return result.removed
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "deleteTasksDueOnLocalDay")
+            await fetchTasks()
+            return 0
+        }
+    }
+
+    private static func isoRangeForLocalDay(_ date: Date, calendar: Calendar = .current) -> (start: String, end: String) {
+        let startDate = calendar.startOfDay(for: date)
+        guard let endDate = calendar.date(byAdding: .day, value: 1, to: startDate) else {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withTimeZone]
+            f.timeZone = calendar.timeZone
+            return (f.string(from: date), f.string(from: date))
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withTimeZone]
+        formatter.timeZone = calendar.timeZone
+        return (formatter.string(from: startDate), formatter.string(from: endDate))
     }
 
     // MARK: - Courses
@@ -160,4 +195,21 @@ final class TaskStore {
             return false
         }
     }
+}
+
+// MARK: - API helpers
+
+private struct TasksRemovedCountResponse: Decodable {
+    let removed: Int
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let i = try? c.decode(Int.self, forKey: .removed) {
+            removed = i
+        } else if let d = try? c.decode(Double.self, forKey: .removed) {
+            removed = Int(d)
+        } else {
+            removed = 0
+        }
+    }
+    private enum CodingKeys: String, CodingKey { case removed }
 }

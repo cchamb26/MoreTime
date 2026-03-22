@@ -117,31 +117,56 @@ final class ScheduleStore {
     /// Clears all **non-locked** schedule blocks on the server for this user, then refetches.
     /// Always calls the API (do not skip when local `blocks` looks empty — list can be stale or month-scoped).
     func clearAllBlocks() async -> Int {
-        struct ClearResponse: Decodable {
-            let removed: Int
-            init(from decoder: Decoder) throws {
-                let c = try decoder.container(keyedBy: CodingKeys.self)
-                if let i = try? c.decode(Int.self, forKey: .removed) {
-                    removed = i
-                } else if let d = try? c.decode(Double.self, forKey: .removed) {
-                    removed = Int(d)
-                } else {
-                    removed = 0
-                }
-            }
-            private enum CodingKeys: String, CodingKey { case removed }
-        }
-
+        error = nil
         // Immediate UI feedback; refetch syncs with server (restores rows if delete failed).
         blocks.removeAll { !$0.isLocked }
 
         do {
-            let result: ClearResponse = try await api.request("DELETE", path: "/schedule/clear")
+            let result: RemovedCountResponse = try await api.request("DELETE", path: "/schedule/clear")
             await refetchLoadedRange()
             return result.removed
         } catch {
             self.error = error.localizedDescription
             log.log(error, source: "ScheduleStore", operation: "clearAllBlocks")
+            await refetchLoadedRange()
+            return 0
+        }
+    }
+
+    /// Deletes **every** schedule block (generated + locked class blocks) for this user.
+    func clearEntireSchedule() async -> Int {
+        error = nil
+        blocks.removeAll()
+
+        do {
+            let result: RemovedCountResponse = try await api.request("DELETE", path: "/schedule/clear-all")
+            await refetchLoadedRange()
+            return result.removed
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "clearEntireSchedule")
+            await refetchLoadedRange()
+            return 0
+        }
+    }
+
+    /// Deletes all schedule blocks on a given calendar day (`yyyy-MM-dd` in the user’s local timezone).
+    func clearScheduleBlocksForDay(_ date: Date) async -> Int {
+        error = nil
+        let key = dateFormatter.string(from: date)
+        blocks.removeAll { $0.date.hasPrefix(key) }
+
+        do {
+            let result: RemovedCountResponse = try await api.request(
+                "DELETE",
+                path: "/schedule/day",
+                query: ["date": key]
+            )
+            await refetchLoadedRange()
+            return result.removed
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "clearScheduleBlocksForDay")
             await refetchLoadedRange()
             return 0
         }
@@ -155,4 +180,21 @@ final class ScheduleStore {
             .filter { $0.date.hasPrefix(dateStr) }
             .sorted { $0.startTime < $1.startTime }
     }
+}
+
+// MARK: - API helpers
+
+private struct RemovedCountResponse: Decodable {
+    let removed: Int
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let i = try? c.decode(Int.self, forKey: .removed) {
+            removed = i
+        } else if let d = try? c.decode(Double.self, forKey: .removed) {
+            removed = Int(d)
+        } else {
+            removed = 0
+        }
+    }
+    private enum CodingKeys: String, CodingKey { case removed }
 }

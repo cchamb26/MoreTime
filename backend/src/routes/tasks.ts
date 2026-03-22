@@ -211,6 +211,36 @@ router.delete('/clear', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+const dueInDayQuerySchema = z.object({
+  start: z.string().min(1),
+  end: z.string().min(1),
+});
+
+/**
+ * Deletes tasks whose due_date falls in [start, end) (half-open), e.g. local start/end of day as ISO-8601 with offset.
+ * Must stay before `DELETE /:id`.
+ */
+router.delete('/due-in-day', validate(dueInDayQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+    const userId = req.user!.userId;
+    const { start, end } = req.query as z.infer<typeof dueInDayQuerySchema>;
+
+    const { count, error } = await supabase
+      .from('tasks')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId)
+      .gte('due_date', start)
+      .lt('due_date', end)
+      .in('status', ['pending', 'in_progress']);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;

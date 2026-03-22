@@ -66,6 +66,7 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 ### Calendar View
 
 - Monthly calendar grid with color-coded indicators: **circles** for schedule blocks, **small squares** for tasks that have a **due date** but no matching block (deduped when a block already links the same task)
+- Toolbar **Clear** menu: **Clear all schedule** (removes every block, including locked class times) and **Clear current day** (removes all blocks on the selected date and deletes pending/in-progress tasks due that local day)
 - Day detail has **Scheduled** (blocks from `/schedule`) and **Due** (tasks due that day); tap a due task to open its detail
 - **Clear Schedule** (toolbar): deletes **non-locked** blocks on the server, refetches the calendar, then updates the UI. Locked class blocks stay. Tasks with due dates can still appear under **Due** until you edit or remove those tasks
 - Navigate between months, jump to today
@@ -309,13 +310,13 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 
 ### Auth — `/auth`
 
-| Method  | Path        | Body                                   | Response                              |
-| ------- | ----------- | -------------------------------------- | ------------------------------------- |
-| `POST`  | `/register` | `{ email, name, password, timezone? }` | `{ user, accessToken, refreshToken }` |
-| `POST`  | `/login`    | `{ email, password }`                  | `{ user, accessToken, refreshToken }` |
-| `POST`  | `/refresh`  | `{ refreshToken }`                     | `{ accessToken, refreshToken }`       |
-| `POST`  | `/logout`   | —                                      | `{ message }`                         |
-| `GET`   | `/me`       | —                                      | `UserProfile`                         |
+| Method  | Path        | Body                                   | Response                                                                                                                                                          |
+| ------- | ----------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`  | `/register` | `{ email, name, password, timezone? }` | `{ user, accessToken, refreshToken }`                                                                                                                             |
+| `POST`  | `/login`    | `{ email, password }`                  | `{ user, accessToken, refreshToken }`                                                                                                                             |
+| `POST`  | `/refresh`  | `{ refreshToken }`                     | `{ accessToken, refreshToken }`                                                                                                                                   |
+| `POST`  | `/logout`   | —                                      | `{ message }`                                                                                                                                                     |
+| `GET`   | `/me`       | —                                      | `UserProfile`                                                                                                                                                     |
 | `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile` (full `preferences` JSON is replaced with the merged object from the client; optional `semesterPlan` string holds the saved semester heat-map JSON) |
 
 ### Courses — `/courses`
@@ -338,17 +339,20 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 | `PATCH`  | `/:id`   | Same fields, all optional                                                           | `TaskItem`                                     |
 | `DELETE` | `/:id`   | —                                                                                   | `204`                                          |
 | `DELETE` | `/clear` | —                                                                                   | `{ removed }`                                  |
+| `DELETE` | `/due-in-day` | Query: `start`, `end` (ISO-8601 instants, half-open `[start,end)`)            | `{ removed }` — pending / in-progress tasks with `due_date` in range |
 
 ### Schedule — `/schedule`
 
-| Method   | Path        | Body / Query                                               | Response                                             |
-| -------- | ----------- | ---------------------------------------------------------- | ---------------------------------------------------- |
-| `GET`    | `/`         | Query: `startDate`, `endDate` (YYYY-MM-DD)                 | `[ScheduleBlock]`                                    |
-| `POST`   | `/`         | `{ taskId?, date, startTime, endTime, isLocked?, label? }` | `ScheduleBlock`                                      |
-| `PATCH`  | `/:id`      | Same fields, all optional                                  | `ScheduleBlock`                                      |
-| `DELETE` | `/:id`      | —                                                          | `204`                                                |
-| `DELETE` | `/clear`    | —                                                          | `{ removed }` — deletes rows where `is_locked` is `false` **or** `null` (non-locked generated blocks only) |
-| `POST`   | `/generate` | —                                                          | `{ blocksCreated, blocksRemoved, blocks, warnings }` |
+| Method   | Path        | Body / Query                                               | Response                                                                                                   |
+| -------- | ----------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/`         | Query: `startDate`, `endDate` (YYYY-MM-DD)                 | `[ScheduleBlock]`                                                                                          |
+| `POST`   | `/`         | `{ taskId?, date, startTime, endTime, isLocked?, label? }` | `ScheduleBlock`                                                                                            |
+| `PATCH`  | `/:id`      | Same fields, all optional                                  | `ScheduleBlock`                                                                                            |
+| `DELETE` | `/:id`      | —                                                          | `204`                                                                                                      |
+| `DELETE` | `/clear`    | —                                                          | `{ removed }` — non-locked blocks only (`is_locked = false`)                                               |
+| `DELETE` | `/clear-all` | —                                                        | `{ removed }` — all blocks for the user (locked + generated)                                               |
+| `DELETE` | `/day`      | Query: `date` (YYYY-MM-DD)                                 | `{ removed }` — all blocks on that calendar date                                                           |
+| `POST`   | `/generate` | —                                                          | `{ blocksCreated, blocksRemoved, blocks, warnings }`                                                       |
 
 ### Chat — `/chat` (rate limited: 20/min)
 
@@ -360,14 +364,14 @@ The AI may return an `action` of type `task_created` with the created task data.
 
 ### Files — `/files` (rate limited: 20/min with other AI routes)
 
-| Method   | Path                 | Body                                                         | Response                                  |
-| -------- | -------------------- | ------------------------------------------------------------ | ----------------------------------------- |
-| `POST`   | `/upload`            | Multipart: `files` + optional `courseId`                     | `[FileUploadResponse]`                    |
-| `GET`    | `/`                  | —                                                            | `[FileUploadResponse]`                    |
-| `GET`    | `/:id`               | —                                                            | `FileUploadResponse`                      |
-| `DELETE` | `/:id`               | —                                                            | `204`                                     |
+| Method   | Path                 | Body                                                                     | Response                                                          |
+| -------- | -------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `POST`   | `/upload`            | Multipart: `files` + optional `courseId`                                 | `[FileUploadResponse]`                                            |
+| `GET`    | `/`                  | —                                                                        | `[FileUploadResponse]`                                            |
+| `GET`    | `/:id`               | —                                                                        | `FileUploadResponse`                                              |
+| `DELETE` | `/:id`               | —                                                                        | `204`                                                             |
 | `POST`   | `/semester-plan`     | `{ fileIds: string[], semesterStart, semesterEnd }` (dates `YYYY-MM-DD`) | `{ weeks, crunchWeeks, totalEvents, semesterStart, semesterEnd }` |
-| `POST`   | `/:id/extract-tasks` | `{ dueDate? }`                                               | `{ extractedCount, tasks, documentType }` |
+| `POST`   | `/:id/extract-tasks` | `{ dueDate? }`                                                           | `{ extractedCount, tasks, documentType }`                         |
 
 Uploaded files are parsed asynchronously. Poll `GET /:id` until `parseStatus` is `completed`. The extract endpoint auto-detects whether the document is a syllabus (extracts all assignments) or a single assignment (breaks it into subtasks).
 
@@ -390,14 +394,14 @@ Uploaded files are parsed asynchronously. Poll `GET /:id` until `parseStatus` is
 
 All tables use UUIDs as primary keys. Row Level Security (RLS) is enabled on every table — users can only access their own data.
 
-| Table             | Key Columns                                                                                | Notes                                           |
-| ----------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                 | Auto-created via trigger on auth signup; may include `semesterPlan` (string) for the saved heat map |
-| `courses`         | `id`, `user_id`, `name`, `color`                                                           |                                                 |
-| `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status` | `course_id` set null on course delete           |
+| Table             | Key Columns                                                                                     | Notes                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                      | Auto-created via trigger on auth signup; may include `semesterPlan` (string) for the saved heat map                                     |
+| `courses`         | `id`, `user_id`, `name`, `color`                                                                |                                                                                                                                         |
+| `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status`      | `course_id` set null on course delete                                                                                                   |
 | `schedule_blocks` | `id`, `user_id`, `task_id`, `course_id`, `date`, `start_time`, `end_time`, `is_locked`, `label` | Optional `course_id` → `courses` for class blocks; API embeds `classCourse` when FK `schedule_blocks_course_id_fkey` exists in Supabase |
-| `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `parsed_content`, `parse_status`            | Status: pending → parsing → completed/failed    |
-| `chat_messages`   | `id`, `user_id`, `role`, `content`, `session_id`, `timestamp`                              | Roles: user, assistant                          |
+| `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `parsed_content`, `parse_status`                 | Status: pending → parsing → completed/failed                                                                                            |
+| `chat_messages`   | `id`, `user_id`, `role`, `content`, `session_id`, `timestamp`                                   | Roles: user, assistant                                                                                                                  |
 
 See `backend/supabase-migration.sql` for the complete schema, indexes, trigger function, and RLS policies.
 

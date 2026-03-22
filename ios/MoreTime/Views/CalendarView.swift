@@ -3,9 +3,12 @@ import SwiftUI
 struct CalendarView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
     @Environment(TaskStore.self) private var taskStore
+    /// When false, the calendar hides tasks that only have a due date (not schedule blocks). After “Clear schedule” we set this to false so the grid isn’t still full of “Due” rows.
+    @AppStorage("calendarShowDueTasks") private var calendarShowDueTasks = true
     @State private var selectedDate = Date()
     @State private var showGenerateSheet = false
-    @State private var showClearConfirm = false
+    @State private var showClearEntireScheduleConfirm = false
+    @State private var showClearCurrentDayConfirm = false
 
     private let calendar = Calendar.current
 
@@ -21,11 +24,20 @@ struct CalendarView: View {
         return f
     }()
 
+    private static let alertDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
     var body: some View {
         // Pre-compute days and blocks-by-date once per render, not per cell
         let days = daysInMonth()
         let blocksByDate = buildBlocksByDateMap()
-        let tasksByDueDay = CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)
+        let tasksByDueDay: [String: [TaskItem]] = calendarShowDueTasks
+            ? CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)
+            : [:]
 
         NavigationStack {
             VStack(spacing: 0) {
@@ -101,7 +113,7 @@ struct CalendarView: View {
                     .padding(.top, 8)
 
                 // Day detail
-                DayDetailView(date: selectedDate)
+                DayDetailView(date: selectedDate, showDueTasks: calendarShowDueTasks)
             }
             .navigationTitle("Schedule")
             .navigationBarTitleDisplayMode(.inline)
@@ -119,19 +131,50 @@ struct CalendarView: View {
                     }
                 }
                 ToolbarItem(placement: .secondaryAction) {
-                    Button("Clear Schedule", role: .destructive) {
-                        showClearConfirm = true
+                    Menu {
+                        Button(role: .destructive) {
+                            showClearEntireScheduleConfirm = true
+                        } label: {
+                            Label("Clear all schedule", systemImage: "calendar.badge.minus")
+                        }
+                        Button(role: .destructive) {
+                            showClearCurrentDayConfirm = true
+                        } label: {
+                            Label("Clear current day", systemImage: "calendar.day.timeline.left")
+                        }
+                    } label: {
+                        Label("Clear", systemImage: "eraser")
                     }
-                    .disabled(scheduleStore.isLoading)
+                    .disabled(scheduleStore.isLoading || taskStore.isLoading)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Toggle("Show tasks due on calendar", isOn: $calendarShowDueTasks)
+                    } label: {
+                        Image(systemName: "calendar.badge.clock")
+                    }
+                    .accessibilityLabel("Calendar display options")
                 }
             }
-            .alert("Clear Schedule", isPresented: $showClearConfirm) {
+            .alert("Clear all schedule?", isPresented: $showClearEntireScheduleConfirm) {
                 Button("Cancel", role: .cancel) { }
-                Button("Clear All", role: .destructive) {
-                    Task { await scheduleStore.clearAllBlocks() }
+                Button("Clear entire calendar", role: .destructive) {
+                    Task { await scheduleStore.clearEntireSchedule() }
                 }
             } message: {
-                Text("Removes every generated study block (unlocked). Locked classes from Settings stay. “Due” rows are tasks with due dates — clear those from the Tasks tab; this button does not delete tasks.")
+                Text("Removes every schedule block everywhere (generated study blocks and locked class times from Settings). Your tasks are not deleted — use Clear current day on a specific date to remove tasks due that day.")
+            }
+            .alert("Clear current day?", isPresented: $showClearCurrentDayConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear this day", role: .destructive) {
+                    Task {
+                        let day = selectedDate
+                        await scheduleStore.clearScheduleBlocksForDay(day)
+                        await taskStore.deleteTasksDueOnLocalDay(day)
+                    }
+                }
+            } message: {
+                Text("For \(Self.alertDayFormatter.string(from: selectedDate)): removes all schedule blocks on that date and deletes every pending or in‑progress task with a due date that falls on that day. Completed tasks are kept. This cannot be undone.")
             }
             .sheet(isPresented: $showGenerateSheet) {
                 ScheduleGenerateView()
@@ -243,6 +286,8 @@ struct DayDetailView: View {
     @Environment(TaskStore.self) private var taskStore
 
     let date: Date
+    /// When false, hide the “Due” section (tasks with due dates only).
+    var showDueTasks: Bool = true
 
     private let calendar = Calendar.current
 
@@ -255,9 +300,12 @@ struct DayDetailView: View {
     var body: some View {
         let blocks = scheduleStore.blocksForDate(date)
         let dateKey = CalendarDueTaskHelpers.dayKey(for: date, calendar: calendar)
-        let tasksByDueDay = CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)
-        let dueOnDay = tasksByDueDay[dateKey] ?? []
-        let orphanDueTasks = CalendarDueTaskHelpers.orphanDueTasks(blocks: blocks, tasksOnDay: dueOnDay)
+        let dueOnDay: [TaskItem] = showDueTasks
+            ? (CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)[dateKey] ?? [])
+            : []
+        let orphanDueTasks: [TaskItem] = showDueTasks
+            ? CalendarDueTaskHelpers.orphanDueTasks(blocks: blocks, tasksOnDay: dueOnDay)
+            : []
 
         VStack(alignment: .leading, spacing: 0) {
             Text(Self.dayFormatter.string(from: date))

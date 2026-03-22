@@ -30,6 +30,48 @@ router.delete('/clear', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
+/** Deletes every schedule block for the user (locked class blocks + generated). */
+router.delete('/clear-all', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+    const userId = req.user!.userId;
+
+    const { count, error } = await supabase
+      .from('schedule_blocks')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const dayDeleteQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+/** Deletes all schedule blocks on a given calendar date (yyyy-MM-dd). */
+router.delete('/day', validate(dayDeleteQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+    const userId = req.user!.userId;
+    const { date } = req.query as z.infer<typeof dayDeleteQuerySchema>;
+
+    const { count, error } = await supabase
+      .from('schedule_blocks')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId)
+      .eq('date', date);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const querySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
