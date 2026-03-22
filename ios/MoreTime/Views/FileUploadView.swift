@@ -180,6 +180,7 @@ struct FileUploadView: View {
                 Button("Done") {
                     Task {
                         await taskStore.fetchTasks()
+                        await taskStore.notifyScheduleRefresh()
                         dismiss()
                     }
                 }

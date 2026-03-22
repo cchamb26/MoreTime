@@ -11,11 +11,23 @@ final class ScheduleStore {
     private let api = APIClient.shared
     private let log = ErrorLogger.shared
 
+    /// Last successful `fetchBlocks` range; used to refresh after task/course changes.
+    private var lastFetchedStart: Date?
+    private var lastFetchedEnd: Date?
+
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
+
+    /// Same window as initial load in `MainTabView` (month start → +3 months).
+    static func defaultFetchWindow(reference: Date = Date()) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let start = calendar.date(from: calendar.dateComponents([.year, .month], from: reference))!
+        let end = calendar.date(byAdding: .month, value: 3, to: start)!
+        return (start, end)
+    }
 
     func fetchBlocks(startDate: Date, endDate: Date) async {
         isLoading = true
@@ -28,9 +40,20 @@ final class ScheduleStore {
                 "endDate": dateFormatter.string(from: endDate),
             ]
             blocks = try await api.request("GET", path: "/schedule", query: query)
+            lastFetchedStart = startDate
+            lastFetchedEnd = endDate
         } catch {
             self.error = error.localizedDescription
             log.log(error, source: "ScheduleStore", operation: "fetchBlocks")
+        }
+    }
+
+    func refetchLoadedRange() async {
+        if let start = lastFetchedStart, let end = lastFetchedEnd {
+            await fetchBlocks(startDate: start, endDate: end)
+        } else {
+            let window = Self.defaultFetchWindow()
+            await fetchBlocks(startDate: window.start, endDate: window.end)
         }
     }
 
@@ -43,11 +66,8 @@ final class ScheduleStore {
             let result: GenerateScheduleResponse = try await api.request("POST", path: "/schedule/generate")
             lastGenerateResult = result
 
-            let now = Date()
-            let calendar = Calendar.current
-            let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-            let end = calendar.date(byAdding: .month, value: 1, to: start)!
-            await fetchBlocks(startDate: start, endDate: end)
+            let window = Self.defaultFetchWindow()
+            await fetchBlocks(startDate: window.start, endDate: window.end)
         } catch {
             self.error = error.localizedDescription
             log.log(error, source: "ScheduleStore", operation: "generateSchedule")

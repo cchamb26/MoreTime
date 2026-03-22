@@ -29,15 +29,18 @@ struct MainTabView: View {
         }
         .tint(.primary)
         .task {
-            let now = Date()
-            let calendar = Calendar.current
-            let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-            let end = calendar.date(byAdding: .month, value: 3, to: start)!
+            taskStore.onDidMutateTasksOrCourses = { await scheduleStore.refetchLoadedRange() }
 
+            let window = ScheduleStore.defaultFetchWindow()
             async let fetchTasks: Void = taskStore.fetchTasks()
             async let fetchCourses: Void = taskStore.fetchCourses()
-            async let fetchBlocks: Void = scheduleStore.fetchBlocks(startDate: start, endDate: end)
+            async let fetchBlocks: Void = scheduleStore.fetchBlocks(startDate: window.start, endDate: window.end)
             _ = await (fetchTasks, fetchCourses, fetchBlocks)
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == 0 {
+                Task { await scheduleStore.refetchLoadedRange() }
+            }
         }
     }
 }

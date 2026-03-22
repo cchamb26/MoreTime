@@ -7,8 +7,20 @@ final class TaskStore {
     var isLoading = false
     var error: String?
 
+    /// Set from the app shell (e.g. `MainTabView`) to refresh calendar blocks after task/course changes.
+    var onDidMutateTasksOrCourses: (() async -> Void)?
+
     private let api = APIClient.shared
     private let log = ErrorLogger.shared
+
+    private func invokeScheduleRefreshCallback() async {
+        await onDidMutateTasksOrCourses?()
+    }
+
+    /// Call after server-backed task changes that did not go through `createTask` / `updateTask` / etc. (e.g. file extract).
+    func notifyScheduleRefresh() async {
+        await invokeScheduleRefreshCallback()
+    }
 
     // MARK: - Tasks
 
@@ -33,6 +45,7 @@ final class TaskStore {
         do {
             let task: TaskItem = try await api.request("POST", path: "/tasks", body: request)
             tasks.insert(task, at: 0)
+            await invokeScheduleRefreshCallback()
             return task
         } catch {
             self.error = error.localizedDescription
@@ -47,6 +60,7 @@ final class TaskStore {
             if let idx = tasks.firstIndex(where: { $0.id == id }) {
                 tasks[idx] = task
             }
+            await invokeScheduleRefreshCallback()
             return task
         } catch {
             self.error = error.localizedDescription
@@ -59,6 +73,7 @@ final class TaskStore {
         do {
             try await api.request("DELETE", path: "/tasks/\(id)") as Void
             tasks.removeAll { $0.id == id }
+            await invokeScheduleRefreshCallback()
             return true
         } catch {
             self.error = error.localizedDescription
@@ -79,6 +94,7 @@ final class TaskStore {
             struct ClearResponse: Decodable { let removed: Int }
             let result: ClearResponse = try await api.request("DELETE", path: "/tasks/clear")
             tasks.removeAll()
+            await invokeScheduleRefreshCallback()
             return result.removed
         } catch {
             self.error = error.localizedDescription
@@ -103,6 +119,7 @@ final class TaskStore {
             let body = CreateCourseRequest(name: name, color: color, metadata: nil)
             let course: Course = try await api.request("POST", path: "/courses", body: body)
             courses.append(course)
+            await invokeScheduleRefreshCallback()
             return course
         } catch {
             self.error = error.localizedDescription
@@ -118,6 +135,7 @@ final class TaskStore {
             if let idx = courses.firstIndex(where: { $0.id == id }) {
                 courses[idx] = course
             }
+            await invokeScheduleRefreshCallback()
             return course
         } catch {
             self.error = error.localizedDescription
@@ -130,6 +148,7 @@ final class TaskStore {
         do {
             try await api.request("DELETE", path: "/courses/\(id)") as Void
             courses.removeAll { $0.id == id }
+            await invokeScheduleRefreshCallback()
             return true
         } catch {
             self.error = error.localizedDescription

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct TaskListView: View {
     @Environment(TaskStore.self) private var taskStore
-    @Environment(ScheduleStore.self) private var scheduleStore
     @State private var showCreateSheet = false
     @State private var sortBy = "dueDate"
     @State private var filterCourseId: String?
@@ -81,10 +80,7 @@ struct TaskListView: View {
         .swipeActions(edge: .leading) {
             if task.status != "completed" {
                 Button {
-                    Task {
-                        await taskStore.completeTask(id: task.id)
-                        scheduleStore.blocks.removeAll { $0.taskId == task.id }
-                    }
+                    Task { await taskStore.completeTask(id: task.id) }
                 } label: {
                     Label("Complete", systemImage: "checkmark")
                 }
