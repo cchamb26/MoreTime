@@ -39,7 +39,11 @@ struct MainTabView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 0 {
-                Task { await scheduleStore.refetchLoadedRange() }
+                Task {
+                    async let refreshBlocks: Void = scheduleStore.refetchLoadedRange()
+                    async let refreshTasks: Void = taskStore.fetchTasks()
+                    _ = await (refreshBlocks, refreshTasks)
+                }
             }
         }
     }

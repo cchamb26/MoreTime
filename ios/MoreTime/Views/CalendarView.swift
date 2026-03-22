@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CalendarView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
+    @Environment(TaskStore.self) private var taskStore
     @State private var selectedDate = Date()
     @State private var showGenerateSheet = false
     @State private var showClearConfirm = false
@@ -24,6 +25,7 @@ struct CalendarView: View {
         // Pre-compute days and blocks-by-date once per render, not per cell
         let days = daysInMonth()
         let blocksByDate = buildBlocksByDateMap()
+        let tasksByDueDay = CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)
 
         NavigationStack {
             VStack(spacing: 0) {
@@ -69,11 +71,18 @@ struct CalendarView: View {
                     ForEach(Array(days.enumerated()), id: \.offset) { index, date in
                         if let date {
                             let dateKey = Self.dayKeyFormatter.string(from: date)
+                            let dayBlocks = blocksByDate[dateKey] ?? []
+                            let dueOnDay = tasksByDueDay[dateKey] ?? []
+                            let dueTasksOnly = CalendarDueTaskHelpers.orphanDueTasks(
+                                blocks: dayBlocks,
+                                tasksOnDay: dueOnDay
+                            )
                             CalendarDayCell(
                                 date: date,
                                 isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
                                 isToday: calendar.isDateInToday(date),
-                                blocks: blocksByDate[dateKey] ?? []
+                                blocks: dayBlocks,
+                                dueTasksOnly: dueTasksOnly
                             )
                             .onTapGesture {
                                 withAnimation(.easeInOut(duration: 0.15)) {
@@ -126,6 +135,9 @@ struct CalendarView: View {
             }
             .sheet(isPresented: $showGenerateSheet) {
                 ScheduleGenerateView()
+            }
+            .navigationDestination(for: TaskItem.self) { task in
+                TaskDetailView(task: task)
             }
         }
     }
@@ -182,8 +194,15 @@ struct CalendarDayCell: View {
     let isSelected: Bool
     let isToday: Bool
     let blocks: [ScheduleBlock]
+    /// Due tasks on this day that are not already shown via a schedule block (`task_id`).
+    let dueTasksOnly: [TaskItem]
 
     private let calendar = Calendar.current
+
+    private var blockIndicators: [ScheduleBlock] { Array(blocks.prefix(3)) }
+    private var taskIndicators: [TaskItem] {
+        Array(dueTasksOnly.prefix(max(0, 3 - blockIndicators.count)))
+    }
 
     var body: some View {
         VStack(spacing: 2) {
@@ -191,11 +210,16 @@ struct CalendarDayCell: View {
                 .font(.system(.callout, design: .rounded, weight: isToday ? .bold : .regular))
                 .foregroundStyle(isSelected ? Color(.systemBackground) : isToday ? Color.primary : Color.primary.opacity(0.8))
 
-            // Block indicators
+            // Block circles + task-only squares (deduped vs blocks)
             HStack(spacing: 2) {
-                ForEach(blocks.prefix(3), id: \.id) { block in
+                ForEach(blockIndicators) { block in
                     Circle()
-                        .fill(Color(hex: block.task?.course?.color ?? "#6B7280"))
+                        .fill(Color(hex: block.task?.course?.color ?? block.classCourse?.color ?? "#6B7280"))
+                        .frame(width: 4, height: 4)
+                }
+                ForEach(taskIndicators) { task in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color(hex: task.course?.color ?? "#6B7280"))
                         .frame(width: 4, height: 4)
                 }
             }
@@ -216,7 +240,11 @@ struct CalendarDayCell: View {
 
 struct DayDetailView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
+    @Environment(TaskStore.self) private var taskStore
+
     let date: Date
+
+    private let calendar = Calendar.current
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -226,6 +254,10 @@ struct DayDetailView: View {
 
     var body: some View {
         let blocks = scheduleStore.blocksForDate(date)
+        let dateKey = CalendarDueTaskHelpers.dayKey(for: date, calendar: calendar)
+        let tasksByDueDay = CalendarDueTaskHelpers.tasksByDueDateKey(tasks: taskStore.tasks, calendar: calendar)
+        let dueOnDay = tasksByDueDay[dateKey] ?? []
+        let orphanDueTasks = CalendarDueTaskHelpers.orphanDueTasks(blocks: blocks, tasksOnDay: dueOnDay)
 
         VStack(alignment: .leading, spacing: 0) {
             Text(Self.dayFormatter.string(from: date))
@@ -233,18 +265,39 @@ struct DayDetailView: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
 
-            if blocks.isEmpty {
+            if blocks.isEmpty, orphanDueTasks.isEmpty {
                 ContentUnavailableView {
-                    Label("No blocks scheduled", systemImage: "calendar.badge.plus")
+                    Label("Nothing on this day", systemImage: "calendar.badge.plus")
                 } description: {
-                    Text("Generate a schedule or add blocks manually")
+                    Text("Add tasks with a due date, generate a schedule, or add class blocks in Settings")
                 }
                 .frame(maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(blocks) { block in
-                            ScheduleBlockCard(block: block)
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        if !blocks.isEmpty {
+                            Text("Scheduled")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                            ForEach(blocks) { block in
+                                ScheduleBlockCard(block: block)
+                            }
+                        }
+
+                        if !orphanDueTasks.isEmpty {
+                            Text("Due")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.top, blocks.isEmpty ? 0 : 4)
+
+                            ForEach(orphanDueTasks) { task in
+                                NavigationLink(value: task) {
+                                    TaskDueRow(task: task)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .padding()
@@ -341,5 +394,121 @@ struct ScheduleBlockCard: View {
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
         }
+    }
+}
+
+// MARK: - Due tasks merged into calendar
+
+private enum CalendarDueTaskHelpers {
+    private static let isoWithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoInternetDateTime: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parseDueDate(_ string: String) -> Date? {
+        if let d = isoWithFractional.date(from: string) { return d }
+        return isoInternetDateTime.date(from: string)
+    }
+
+    static func dayKey(for date: Date, calendar: Calendar) -> String {
+        let y = calendar.component(.year, from: date)
+        let m = calendar.component(.month, from: date)
+        let d = calendar.component(.day, from: date)
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    static func dueDayKey(forDueString string: String, calendar: Calendar) -> String? {
+        guard let date = parseDueDate(string) else { return nil }
+        return dayKey(for: date, calendar: calendar)
+    }
+
+    static func tasksByDueDateKey(tasks: [TaskItem], calendar: Calendar) -> [String: [TaskItem]] {
+        var map: [String: [TaskItem]] = [:]
+        for task in tasks {
+            guard task.status != "completed",
+                  let due = task.dueDate,
+                  let key = dueDayKey(forDueString: due, calendar: calendar) else { continue }
+            map[key, default: []].append(task)
+        }
+        for key in map.keys {
+            map[key]?.sort { lhs, rhs in
+                let l = lhs.dueDate.flatMap { parseDueDate($0) } ?? .distantFuture
+                let r = rhs.dueDate.flatMap { parseDueDate($0) } ?? .distantFuture
+                return l < r
+            }
+        }
+        return map
+    }
+
+    static func orphanDueTasks(blocks: [ScheduleBlock], tasksOnDay: [TaskItem]) -> [TaskItem] {
+        var linked = Set<String>()
+        for block in blocks {
+            if let tid = block.taskId { linked.insert(tid) }
+            if let tid = block.task?.id { linked.insert(tid) }
+        }
+        return tasksOnDay.filter { !linked.contains($0.id) }
+    }
+}
+
+private struct TaskDueRow: View {
+    let task: TaskItem
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .trailing, spacing: 2) {
+                if let due = task.dueDate, let parsed = CalendarDueTaskHelpers.parseDueDate(due) {
+                    Text(Self.timeFormatter.string(from: parsed))
+                        .font(.caption.monospacedDigit())
+                } else {
+                    Text("—")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Text("due")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 52, alignment: .trailing)
+
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(hex: task.course?.color ?? "#6B7280"))
+                .frame(width: 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.primary)
+                    .multilineTextAlignment(.leading)
+
+                if let courseName = task.course?.name {
+                    Text(courseName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(Color.gray.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
     }
 }
