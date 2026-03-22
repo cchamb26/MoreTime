@@ -10,6 +10,26 @@ import { generateSchedule } from '../services/scheduling.js';
 const router = Router();
 router.use(authGuard);
 
+// Must be registered before `DELETE /:id` so `/clear` is never captured as an id.
+router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const supabase = getSupabase();
+    const userId = req.user!.userId;
+
+    // Schema uses is_locked boolean NOT NULL default false — only delete generated blocks.
+    const { count, error } = await supabase
+      .from('schedule_blocks')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId)
+      .eq('is_locked', false);
+
+    if (error) throw error;
+    res.json({ removed: count ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const querySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -135,23 +155,6 @@ router.patch(
     }
   },
 );
-
-router.delete('/clear', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const supabase = getSupabase();
-
-    const { count, error } = await supabase
-      .from('schedule_blocks')
-      .delete({ count: 'exact' })
-      .eq('user_id', req.user!.userId)
-      .eq('is_locked', false);
-
-    if (error) throw error;
-    res.json({ removed: count ?? 0 });
-  } catch (err) {
-    next(err);
-  }
-});
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

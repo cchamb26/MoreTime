@@ -65,16 +65,30 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 
 ### Calendar View
 
-- Monthly calendar grid with color-coded block indicators per day
-- Day detail view showing all scheduled blocks with time, task, and course info
+- Monthly calendar grid with color-coded indicators: **circles** for schedule blocks, **small squares** for tasks that have a **due date** but no matching block (deduped when a block already links the same task)
+- Day detail has **Scheduled** (blocks from `/schedule`) and **Due** (tasks due that day); tap a due task to open its detail
+- **Clear Schedule** (toolbar): deletes **non-locked** blocks on the server, refetches the calendar, then updates the UI. Locked class blocks stay. Tasks with due dates can still appear under **Due** until you edit or remove those tasks
 - Navigate between months, jump to today
 - Locked blocks (recurring classes) shown with lock icon
 
-### Course Management
+### Semester Heat Map
+
+- **Semester** tab: upload multiple syllabi (PDF/DOCX), map files to course names, pick semester dates, generate an AI **week-by-week** workload view (intensity, crunch weeks, events list)
+- **Apply to Calendar** creates tasks from plan events via `POST /tasks`
+- **One plan per user**: the generated `SemesterPlan` is stored in profile **`preferences.semesterPlan`** (JSON string). **New Plan** clears local state and removes that preference via `PATCH /auth/me`
+- Reopening the Semester tab restores the saved plan after `GET /auth/me` (if present)
+
+### Course Management & Class Schedule (Settings)
+
+- **Settings → Courses & class schedule** (sheet): manage courses, add recurring **locked** class blocks to the calendar (with **Repeat until** end date for weekly repetition)
+- **Delete course**: from the course edit sheet (**Delete course**), swipe-to-delete on the list, or clear the class picker when that course is removed
+- **Delete scheduled class**: open the class in the editor (**Delete from schedule**) or swipe left on a row in **Scheduled classes (locked)**
+
+### Course Management (Tasks & Blocks)
 
 - Create courses with custom names and hex colors
-- All tasks and schedule blocks are associated with courses
-- Task count displayed per course
+- Tasks and schedule blocks can be associated with courses (optional for some tasks)
+- Task count displayed per course in the course list
 
 ---
 
@@ -106,15 +120,17 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 - **Azure OpenAI** for all AI features: chat completions, document parsing, schedule generation, image OCR, and audio transcription
 - **Service layer** separates business logic (chat context building, schedule optimization, file parsing) from route handlers
 - **snake_case ↔ camelCase** transform layer between Supabase (snake) and API responses (camel)
-- Rate limiting: 200 req/15 min global, 20 req/min for AI endpoints
+- Rate limiting: 200 req/15 min global; stricter limiter (20 req/min) on `/chat`, `/files`, and `/voice` (AI-heavy routes)
 
 ### iOS
 
-- **@Observable stores** (`AuthStore`, `TaskStore`, `ScheduleStore`, `ChatStore`) manage state and are injected via SwiftUI's `.environment()`
+- **@Observable stores** (`AuthStore`, `TaskStore`, `ScheduleStore`, `ChatStore`, `SemesterStore`) manage state and are injected via SwiftUI's `.environment()`
 - **APIClient** singleton handles all networking with automatic token refresh on 401 responses
 - **KeychainHelper** stores auth tokens securely
 - **ErrorLogger** captures and surfaces API errors via toast banners and a debug log
-- Targets iOS 17+ using `@Observable` (not Combine)
+- **Profile preferences** (`PATCH /auth/me`): merged client-side; used for study-time prefs and persisted **semester plan** (`semesterPlan` key)
+- Tab bar: **Calendar**, **Tasks**, **Chat**, **Semester**, **Settings** — switching to Calendar refreshes tasks and loaded schedule range
+- Targets iOS 17+ using `@Observable` (not Combine); tab bar uses iOS 17–compatible `.tabItem` / `.tag` APIs
 
 ---
 
@@ -147,12 +163,12 @@ MoreTime/
 │   │   │   ├── tasks.ts              # CRUD for tasks
 │   │   │   ├── schedule.ts           # Schedule blocks + AI generation
 │   │   │   ├── chat.ts               # AI chat messages
-│   │   │   ├── files.ts              # File upload + task extraction
+│   │   │   ├── files.ts              # File upload, task extraction, semester-plan API
 │   │   │   └── voice.ts              # Audio transcription + voice chat
 │   │   ├── services/
-│   │   │   ├── ai.ts                 # Azure OpenAI wrappers (chat, extract, schedule)
+│   │   │   ├── ai.ts                 # Azure OpenAI (chat, extract, schedule, semester plan)
 │   │   │   ├── chat.ts               # Chat context builder + action parser
-│   │   │   ├── scheduling.ts         # Schedule generation + validation
+│   │   │   ├── scheduling.ts         # Schedule generation, validation, semester week grouping
 │   │   │   ├── fileParser.ts         # PDF, DOCX, TXT, image parsing
 │   │   │   └── voice.ts              # Audio transcription via Azure
 │   │   ├── middleware/
@@ -175,13 +191,14 @@ MoreTime/
 │       ├── Views/
 │       │   ├── RootView.swift         # Auth routing (login vs main)
 │       │   ├── LoginView.swift        # Sign in + registration
-│       │   ├── MainTabView.swift      # Tab bar (Calendar, Tasks, Chat, Settings)
-│       │   ├── CalendarView.swift     # Monthly calendar + day detail
+│       │   ├── MainTabView.swift      # Tab bar (Calendar, Tasks, Chat, Semester, Settings)
+│       │   ├── CalendarView.swift     # Calendar + merged due tasks + day detail
+│       │   ├── SemesterHeatMapView.swift  # Semester heat map + apply to calendar
 │       │   ├── TaskListView.swift     # Task list with grouping + sorting
 │       │   ├── TaskDetailView.swift   # Task edit/create form
 │       │   ├── ChatView.swift         # AI chat interface
 │       │   ├── VoiceInputView.swift   # Voice recording UI
-│       │   ├── SettingsView.swift     # Settings + locked blocks
+│       │   ├── SettingsView.swift     # Settings, study prefs, courses & class schedule sheet
 │       │   ├── ScheduleGenerateView.swift  # Schedule generation UI
 │       │   ├── FileUploadView.swift   # File upload + task extraction
 │       │   ├── CourseManagementView.swift   # Course CRUD
@@ -190,7 +207,8 @@ MoreTime/
 │       │   ├── AuthStore.swift        # Auth state management
 │       │   ├── TaskStore.swift        # Tasks + courses state
 │       │   ├── ScheduleStore.swift    # Schedule blocks state
-│       │   └── ChatStore.swift        # Chat messages state
+│       │   ├── ChatStore.swift        # Chat messages state
+│       │   └── SemesterStore.swift    # Semester plan, file upload helpers, apply-to-tasks
 │       ├── Services/
 │       │   ├── APIClient.swift        # HTTP client with token refresh
 │       │   ├── KeychainHelper.swift   # Secure token storage
@@ -236,8 +254,9 @@ It also creates a trigger (`on_auth_user_created`) that automatically inserts a 
 
 3. Go to **Project Settings → API** and copy:
    - **Project URL** → `SUPABASE_URL`
-   - **anon public** key → `SUPABASE_ANON_KEY`
-   - **service_role secret** key → `SUPABASE_SERVICE_ROLE_KEY`
+   - **service_role secret** key → `SUPABASE_SERVICE_ROLE_KEY` (used by the Node API only; keep server-side)
+
+The backend does **not** require the Supabase anon key. Use the anon key only if you add a Supabase client directly in a mobile or web app.
 
 ### Backend Setup
 
@@ -257,7 +276,7 @@ curl http://localhost:3000/health
 ### iOS Setup
 
 1. Open `ios/MoreTime.xcodeproj` in Xcode
-2. The iOS app connects to `http://localhost:3000` in DEBUG mode and to the Azure production URL in release builds (configured in `APIClient.swift`)
+2. Set the API base URL in [`ios/MoreTime/Services/APIClient.swift`](ios/MoreTime/Services/APIClient.swift) (`baseURL`) — e.g. your deployed Azure Web App or `http://localhost:3000` for a local backend
 3. Build and run on the iOS Simulator (or a physical device)
 
 #### Dev Bypass (Optional)
@@ -273,7 +292,6 @@ Create a `.env` file in the project root (used by the backend):
 | Variable                       | Required | Description                                                    |
 | ------------------------------ | -------- | -------------------------------------------------------------- |
 | `SUPABASE_URL`                 | Yes      | Your Supabase project URL (e.g., `https://xxx.supabase.co`)    |
-| `SUPABASE_ANON_KEY`            | Yes      | Supabase anon/public key                                       |
 | `SUPABASE_SERVICE_ROLE_KEY`    | Yes      | Supabase service role key (secret — used for admin operations) |
 | `AZURE_OPENAI_ENDPOINT`        | Yes      | Azure OpenAI resource endpoint                                 |
 | `AZURE_OPENAI_API_KEY`         | Yes      | Azure OpenAI API key                                           |
@@ -298,7 +316,7 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 | `POST`  | `/refresh`  | `{ refreshToken }`                     | `{ accessToken, refreshToken }`       |
 | `POST`  | `/logout`   | —                                      | `{ message }`                         |
 | `GET`   | `/me`       | —                                      | `UserProfile`                         |
-| `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile`                         |
+| `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile` (full `preferences` JSON is replaced with the merged object from the client; optional `semesterPlan` string holds the saved semester heat-map JSON) |
 
 ### Courses — `/courses`
 
@@ -329,7 +347,7 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 | `POST`   | `/`         | `{ taskId?, date, startTime, endTime, isLocked?, label? }` | `ScheduleBlock`                                      |
 | `PATCH`  | `/:id`      | Same fields, all optional                                  | `ScheduleBlock`                                      |
 | `DELETE` | `/:id`      | —                                                          | `204`                                                |
-| `DELETE` | `/clear`    | —                                                          | `{ removed }` (non-locked only)                      |
+| `DELETE` | `/clear`    | —                                                          | `{ removed }` — deletes rows where `is_locked` is `false` **or** `null` (non-locked generated blocks only) |
 | `POST`   | `/generate` | —                                                          | `{ blocksCreated, blocksRemoved, blocks, warnings }` |
 
 ### Chat — `/chat` (rate limited: 20/min)
@@ -340,14 +358,16 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 
 The AI may return an `action` of type `task_created` with the created task data. When this happens, the schedule is automatically regenerated in the background.
 
-### Files — `/files`
+### Files — `/files` (rate limited: 20/min with other AI routes)
 
-| Method | Path                 | Body                                     | Response                                  |
-| ------ | -------------------- | ---------------------------------------- | ----------------------------------------- |
-| `POST` | `/upload`            | Multipart: `files` + optional `courseId` | `[FileUploadResponse]`                    |
-| `GET`  | `/`                  | —                                        | `[FileUploadResponse]`                    |
-| `GET`  | `/:id`               | —                                        | `FileUploadResponse`                      |
-| `POST` | `/:id/extract-tasks` | `{ dueDate? }`                           | `{ extractedCount, tasks, documentType }` |
+| Method   | Path                 | Body                                                         | Response                                  |
+| -------- | -------------------- | ------------------------------------------------------------ | ----------------------------------------- |
+| `POST`   | `/upload`            | Multipart: `files` + optional `courseId`                     | `[FileUploadResponse]`                    |
+| `GET`    | `/`                  | —                                                            | `[FileUploadResponse]`                    |
+| `GET`    | `/:id`               | —                                                            | `FileUploadResponse`                      |
+| `DELETE` | `/:id`               | —                                                            | `204`                                     |
+| `POST`   | `/semester-plan`     | `{ fileIds: string[], semesterStart, semesterEnd }` (dates `YYYY-MM-DD`) | `{ weeks, crunchWeeks, totalEvents, semesterStart, semesterEnd }` |
+| `POST`   | `/:id/extract-tasks` | `{ dueDate? }`                                               | `{ extractedCount, tasks, documentType }` |
 
 Uploaded files are parsed asynchronously. Poll `GET /:id` until `parseStatus` is `completed`. The extract endpoint auto-detects whether the document is a syllabus (extracts all assignments) or a single assignment (breaks it into subtasks).
 
@@ -372,10 +392,10 @@ All tables use UUIDs as primary keys. Row Level Security (RLS) is enabled on eve
 
 | Table             | Key Columns                                                                                | Notes                                           |
 | ----------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                 | Auto-created via trigger on auth signup         |
+| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                 | Auto-created via trigger on auth signup; may include `semesterPlan` (string) for the saved heat map |
 | `courses`         | `id`, `user_id`, `name`, `color`                                                           |                                                 |
 | `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status` | `course_id` set null on course delete           |
-| `schedule_blocks` | `id`, `user_id`, `task_id`, `date`, `start_time`, `end_time`, `is_locked`, `label`         | Locked blocks are preserved during regeneration |
+| `schedule_blocks` | `id`, `user_id`, `task_id`, `course_id`, `date`, `start_time`, `end_time`, `is_locked`, `label` | Optional `course_id` → `courses` for class blocks; API embeds `classCourse` when FK `schedule_blocks_course_id_fkey` exists in Supabase |
 | `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `parsed_content`, `parse_status`            | Status: pending → parsing → completed/failed    |
 | `chat_messages`   | `id`, `user_id`, `role`, `content`, `session_id`, `timestamp`                              | Roles: user, assistant                          |
 

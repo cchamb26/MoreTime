@@ -185,24 +185,14 @@ struct PriorityBadge: View {
     let priority: Int
 
     var body: some View {
-        Text("P\(priority)")
-            .font(.caption2.weight(.bold).monospacedDigit())
-            .padding(.horizontal, 6)
+        Text(TaskPriorityUI.label(for: priority))
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .background {
                 Capsule()
-                    .fill(priorityColor.opacity(0.15))
+                    .fill(TaskPriorityUI.color(for: priority).opacity(0.15))
             }
-            .foregroundStyle(priorityColor)
-    }
-
-    private var priorityColor: Color {
-        switch priority {
-        case 1: return .red
-        case 2: return .orange
-        case 3: return .yellow
-        case 4: return .green
-        default: return .gray
-        }
+            .foregroundStyle(TaskPriorityUI.color(for: priority))
     }
 }

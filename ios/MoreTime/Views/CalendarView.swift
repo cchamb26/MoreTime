@@ -122,7 +122,7 @@ struct CalendarView: View {
                     Button("Clear Schedule", role: .destructive) {
                         showClearConfirm = true
                     }
-                    .disabled(scheduleStore.blocks.filter { !$0.isLocked }.isEmpty)
+                    .disabled(scheduleStore.isLoading)
                 }
             }
             .alert("Clear Schedule", isPresented: $showClearConfirm) {
@@ -131,7 +131,7 @@ struct CalendarView: View {
                     Task { await scheduleStore.clearAllBlocks() }
                 }
             } message: {
-                Text("This will remove all generated schedule blocks. Locked blocks (classes, work, etc.) will be kept. This cannot be undone.")
+                Text("Removes every generated study block (unlocked). Locked classes from Settings stay. “Due” rows are tasks with due dates — clear those from the Tasks tab; this button does not delete tasks.")
             }
             .sheet(isPresented: $showGenerateSheet) {
                 ScheduleGenerateView()
@@ -378,7 +378,8 @@ struct ScheduleBlockCard: View {
                     HStack(spacing: 16) {
                         Label("\(durationMinutes) min", systemImage: "clock")
                         if let p = block.task?.priority {
-                            Label("P\(p)", systemImage: "flag")
+                            Label(TaskPriorityUI.label(for: p), systemImage: "flag")
+                                .foregroundStyle(TaskPriorityUI.color(for: p))
                         }
                     }
                     .font(.caption)
