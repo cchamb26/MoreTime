@@ -3,12 +3,14 @@ import UniformTypeIdentifiers
 
 struct SemesterHeatMapView: View {
     @Environment(SemesterStore.self) private var store
+    @Environment(TaskStore.self) private var taskStore
 
     @State private var isPickerPresented = false
     @State private var selectedFiles: [SelectedFile] = []
     @State private var semesterStart = Self.defaultSemesterStart
     @State private var semesterEnd = Self.defaultSemesterEnd
     @State private var showExistingFiles = false
+    @State private var showApplyConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -193,6 +195,7 @@ struct SemesterHeatMapView: View {
             crunchBanner(plan.crunchWeeks)
             legendBar
             summaryBar(plan)
+            applyBar
 
             ScrollView {
                 LazyVStack(spacing: 2) {
@@ -202,6 +205,56 @@ struct SemesterHeatMapView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 20)
+            }
+        }
+        .alert("Apply to Calendar", isPresented: $showApplyConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Apply All") {
+                Task {
+                    let count = await store.applyToCalendar()
+                    if count > 0 { await taskStore.fetchTasks() }
+                }
+            }
+        } message: {
+            let total = plan.weeks.reduce(0) { $0 + $1.events.count }
+            Text("This will create \(total) tasks from your semester plan. You can then generate a study schedule from the Calendar tab.")
+        }
+    }
+
+    private var applyBar: some View {
+        Group {
+            if store.appliedCount > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("\(store.appliedCount) tasks added to calendar")
+                        .font(.caption.weight(.medium))
+                }
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.green.opacity(0.08))
+            } else {
+                Button {
+                    showApplyConfirm = true
+                } label: {
+                    if store.isApplying {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Adding tasks...")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                    } else {
+                        Label("Apply to Calendar", systemImage: "calendar.badge.plus")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                }
+                .disabled(store.isApplying)
+                .background(.primary.opacity(0.06))
             }
         }
     }
@@ -274,10 +327,16 @@ struct SemesterHeatMapView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if store.semesterPlan != nil {
-            ToolbarItem(placement: .primaryAction) {
-                Button("New Plan") {
-                    store.reset()
-                    selectedFiles.removeAll()
+            ToolbarItem(placement: .cancellationAction) {
+                Menu {
+                    Button {
+                        store.reset()
+                        selectedFiles.removeAll()
+                    } label: {
+                        Label("New Plan", systemImage: "arrow.counterclockwise")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }

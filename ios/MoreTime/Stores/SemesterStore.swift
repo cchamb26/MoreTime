@@ -56,8 +56,52 @@ final class SemesterStore {
         return results
     }
 
+    var isApplying = false
+    var appliedCount = 0
+
+    func applyToCalendar() async -> Int {
+        guard let plan = semesterPlan else { return 0 }
+        isApplying = true
+        error = nil
+        defer { isApplying = false }
+
+        let allEvents = plan.weeks.flatMap(\.events)
+        var created = 0
+
+        for event in allEvents {
+            let dueDate = "\(event.dueDate)T23:59:00Z"
+            let request = CreateTaskRequest(
+                courseId: nil,
+                title: event.title,
+                description: "\(event.courseName) — \(event.type.capitalized)",
+                dueDate: dueDate,
+                priority: priorityForType(event.type),
+                estimatedHours: event.estimatedHours,
+                status: nil
+            )
+            do {
+                let _: TaskItem = try await api.request("POST", path: "/tasks", body: request)
+                created += 1
+            } catch {
+                log.log(error, source: "SemesterStore", operation: "applyEvent")
+            }
+        }
+
+        appliedCount = created
+        return created
+    }
+
+    private func priorityForType(_ type: String) -> Int {
+        switch type.lowercased() {
+        case "exam": return 1
+        case "project", "paper": return 2
+        default: return 3
+        }
+    }
+
     func reset() {
         semesterPlan = nil
         error = nil
+        appliedCount = 0
     }
 }
