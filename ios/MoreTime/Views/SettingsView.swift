@@ -9,7 +9,6 @@ struct SettingsView: View {
     @State private var prefsSaveMessage: String?
     @State private var showClassSchedule = false
     @State private var showFileUpload = false
-    @State private var showDebugLog = false
 
     var body: some View {
         NavigationStack {
@@ -56,6 +55,12 @@ struct SettingsView: View {
                 }
 
                 Section("Manage") {
+                    NavigationLink {
+                        PastReflectionsView()
+                    } label: {
+                        Label("Past reflections", systemImage: "text.quote")
+                    }
+
                     Button {
                         showClassSchedule = true
                     } label: {
@@ -67,29 +72,6 @@ struct SettingsView: View {
                     } label: {
                         Label("Upload Syllabus", systemImage: "doc.badge.plus")
                     }
-                }
-
-                Section("Debug") {
-                    Button {
-                        showDebugLog = true
-                    } label: {
-                        HStack {
-                            Label("Error Log", systemImage: "ladybug")
-                            Spacer()
-                            let count = ErrorLogger.shared.entries.count
-                            if count > 0 {
-                                Text("\(count)")
-                                    .font(.caption.monospacedDigit())
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .foregroundStyle(.red)
-                                    .background(.red.opacity(0.15), in: Capsule())
-                            }
-                        }
-                    }
-
-                    LabeledContent("API", value: APIClient.shared.baseURL)
-                        .font(.caption)
                 }
 
                 Section {
@@ -112,9 +94,6 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showFileUpload) {
                 FileUploadView(courseId: nil)
-            }
-            .sheet(isPresented: $showDebugLog) {
-                DebugLogView()
             }
         }
     }

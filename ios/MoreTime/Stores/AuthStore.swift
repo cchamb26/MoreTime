@@ -1,5 +1,66 @@
 import Foundation
 
+/// One saved learning debrief from `preferences.learningDebriefs` (newest-first in `AuthStore.learningDebriefEntries()`).
+struct LearningDebriefEntry: Identifiable, Hashable {
+    let id: String
+    let taskId: String
+    let taskTitle: String
+    let confidence: Int
+    /// Raw value from storage (e.g. `time`, `understanding`, or custom text).
+    let blocker: String
+    let revisit: String
+    let recordedAt: Date?
+    let atISO: String
+
+    var blockerDisplayLabel: String {
+        switch blocker.lowercased() {
+        case "time": return "Ran out of time"
+        case "understanding": return "Didn't fully understand"
+        case "motivation": return "Hard to stay motivated"
+        case "other": return "Other"
+        default: return blocker.isEmpty ? "—" : blocker
+        }
+    }
+
+    init?(dictionary: [String: Any]) {
+        let title = (dictionary["taskTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !title.isEmpty else { return nil }
+
+        let id = (dictionary["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let taskId = (dictionary["taskId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let conf: Int = {
+            if let i = dictionary["confidence"] as? Int { return min(5, max(1, i)) }
+            if let d = dictionary["confidence"] as? Double { return min(5, max(1, Int(d.rounded()))) }
+            if let s = dictionary["confidence"] as? String, let v = Int(s) { return min(5, max(1, v)) }
+            return 3
+        }()
+
+        let blocker = (dictionary["blocker"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let revisit = (dictionary["revisit"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let at = (dictionary["at"] as? String) ?? ""
+
+        let frac = ISO8601DateFormatter()
+        frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let recordedAt = frac.date(from: at) ?? plain.date(from: at)
+
+        if let id, !id.isEmpty {
+            self.id = id
+        } else {
+            self.id = "\(taskId)-\(at)-\(title.hashValue)"
+        }
+        self.taskId = taskId
+        self.taskTitle = title
+        self.confidence = conf
+        self.blocker = blocker
+        self.revisit = revisit
+        self.recordedAt = recordedAt
+        self.atISO = at
+    }
+}
+
 @Observable
 final class AuthStore {
     var currentUser: UserProfile?
@@ -104,6 +165,71 @@ final class AuthStore {
     }
 
     private static let semesterPlanPreferenceKey = "semesterPlan"
+    private static let learningDebriefsPreferenceKey = "learningDebriefs"
+    private static let maxLearningDebriefsStored = 25
+
+    /// Appends a learning debrief to `preferences.learningDebriefs` (capped, preserves other preference keys).
+    func appendLearningDebrief(
+        taskId: String,
+        title: String,
+        confidence: Int,
+        blocker: String,
+        revisit: String?,
+    ) async -> Bool {
+        var merged = Self.preferencesDictionary(from: currentUser)
+        var list = Self.learningDebriefsArray(from: merged)
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        var revisitTrimmed = (revisit ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if revisitTrimmed.count > 200 {
+            revisitTrimmed = String(revisitTrimmed.prefix(200))
+        }
+
+        let clampedConfidence = min(5, max(1, confidence))
+        let entry: [String: Any] = [
+            "id": UUID().uuidString,
+            "at": iso.string(from: Date()),
+            "taskId": taskId,
+            "taskTitle": title,
+            "confidence": clampedConfidence,
+            "blocker": String(blocker.prefix(80)),
+            "revisit": revisitTrimmed,
+        ]
+        list.append(entry)
+        if list.count > Self.maxLearningDebriefsStored {
+            list = Array(list.suffix(Self.maxLearningDebriefsStored))
+        }
+
+        return await updatePreferences(merging: [Self.learningDebriefsPreferenceKey: list])
+    }
+
+    private static func learningDebriefsArray(from prefs: [String: Any]) -> [[String: Any]] {
+        guard let raw = prefs[learningDebriefsPreferenceKey] else { return [] }
+        if let arr = raw as? [[String: Any]] { return arr }
+        if let arr = raw as? [Any] {
+            return arr.compactMap { $0 as? [String: Any] }
+        }
+        return []
+    }
+
+    /// Reflections saved after completing tasks, newest first.
+    func learningDebriefEntries() -> [LearningDebriefEntry] {
+        let raw = Self.learningDebriefsArray(from: Self.preferencesDictionary(from: currentUser))
+        let entries = raw.compactMap { LearningDebriefEntry(dictionary: $0) }
+        return entries.sorted { a, b in
+            guard let da = a.recordedAt, let db = b.recordedAt else {
+                return a.atISO > b.atISO
+            }
+            return da > db
+        }
+    }
+
+    /// Removes all stored learning debriefs from profile preferences.
+    func clearLearningDebriefs() async -> Bool {
+        await updatePreferences(merging: [:], removingKeys: Set([Self.learningDebriefsPreferenceKey]))
+    }
 
     /// Saves or clears the single persisted semester heat-map plan (JSON string in `preferences`).
     func persistSemesterPlan(_ plan: SemesterPlan?) async -> Bool {

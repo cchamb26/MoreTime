@@ -1,8 +1,20 @@
 import SwiftUI
 
+private struct DebriefTaskRef: Identifiable {
+    let id: String
+    let title: String
+
+    init(taskId: String, title: String) {
+        id = taskId
+        self.title = title
+    }
+}
+
 struct TaskListView: View {
     @Environment(TaskStore.self) private var taskStore
+    @Environment(AuthStore.self) private var authStore
     @State private var showCreateSheet = false
+    @State private var pendingDebriefTask: DebriefTaskRef?
     @State private var sortBy = "dueDate"
     @State private var filterCourseId: String?
     @State private var showCompleted = false
@@ -32,6 +44,12 @@ struct TaskListView: View {
                 }
             } message: {
                 Text("This will permanently delete all your tasks and any associated schedule blocks. This cannot be undone.")
+            }
+            .sheet(item: $pendingDebriefTask) { ref in
+                LearningDebriefSheet(taskId: ref.id, taskTitle: ref.title) {
+                    pendingDebriefTask = nil
+                }
+                .environment(authStore)
             }
             .refreshable {
                 await taskStore.fetchTasks(sortBy: sortBy)
@@ -80,7 +98,13 @@ struct TaskListView: View {
         .swipeActions(edge: .leading) {
             if task.status != "completed" {
                 Button {
-                    Task { await taskStore.completeTask(id: task.id) }
+                    let ref = DebriefTaskRef(taskId: task.id, title: task.title)
+                    Task {
+                        await taskStore.completeTask(id: ref.id)
+                        if taskStore.tasks.first(where: { $0.id == ref.id })?.status == "completed" {
+                            pendingDebriefTask = ref
+                        }
+                    }
                 } label: {
                     Label("Complete", systemImage: "checkmark")
                 }

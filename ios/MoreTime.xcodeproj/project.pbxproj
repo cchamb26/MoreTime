@@ -33,9 +33,10 @@
 		A10000024 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000024 /* Assets.xcassets */; };
 		A10000025 /* ErrorLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000025 /* ErrorLogger.swift */; };
 		A10000026 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000026 /* ErrorBanner.swift */; };
-		A10000027 /* DebugLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000027 /* DebugLogView.swift */; };
 		A10000029 /* SemesterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000029 /* SemesterStore.swift */; };
 		A10000030 /* SemesterHeatMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* SemesterHeatMapView.swift */; };
+		A10000031 /* LearningDebriefSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000031 /* LearningDebriefSheet.swift */; };
+		A10000032 /* PastReflectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000032 /* PastReflectionsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -68,6 +69,8 @@
 		B10000027 /* DebugLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogView.swift; sourceTree = "<group>"; };
 		B10000029 /* SemesterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemesterStore.swift; sourceTree = "<group>"; };
 		B10000030 /* SemesterHeatMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemesterHeatMapView.swift; sourceTree = "<group>"; };
+		B10000031 /* LearningDebriefSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDebriefSheet.swift; sourceTree = "<group>"; };
+		B10000032 /* PastReflectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastReflectionsView.swift; sourceTree = "<group>"; };
 		C10000001 /* MoreTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MoreTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -151,8 +154,9 @@
 				B10000020 /* TaskDetailView.swift */,
 				B10000021 /* TaskListView.swift */,
 				B10000022 /* VoiceInputView.swift */,
-				B10000027 /* DebugLogView.swift */,
 				B10000030 /* SemesterHeatMapView.swift */,
+				B10000031 /* LearningDebriefSheet.swift */,
+				B10000032 /* PastReflectionsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -268,9 +272,10 @@
 				A10000023 /* ColorExtension.swift in Sources */,
 				A10000025 /* ErrorLogger.swift in Sources */,
 				A10000026 /* ErrorBanner.swift in Sources */,
-				A10000027 /* DebugLogView.swift in Sources */,
 				A10000029 /* SemesterStore.swift in Sources */,
 				A10000030 /* SemesterHeatMapView.swift in Sources */,
+				A10000031 /* LearningDebriefSheet.swift in Sources */,
+				A10000032 /* PastReflectionsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

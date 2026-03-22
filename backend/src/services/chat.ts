@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getSupabase } from '../utils/supabase.js';
 import { ValidationError } from '../utils/errors.js';
+import { formatLearningDebriefsForPrompt } from '../utils/learningDebriefs.js';
 import { chatCompletion } from './ai.js';
 import { generateSchedule } from './scheduling.js';
 
@@ -41,7 +42,7 @@ async function buildSystemContext(userId: string): Promise<string> {
       .order('start_time'),
     supabase
       .from('profiles')
-      .select('name, timezone')
+      .select('name, timezone, preferences')
       .eq('id', userId)
       .single(),
     supabase
@@ -74,6 +75,9 @@ async function buildSystemContext(userId: string): Promise<string> {
     .map((c: Record<string, unknown>) => `- "${c.name}" (id: ${c.id})`)
     .join('\n');
 
+  const prefs = user && typeof user === 'object' ? (user as Record<string, unknown>).preferences : undefined;
+  const debriefLines = formatLearningDebriefsForPrompt(prefs);
+
   return `You are MoreTime, an AI study assistant helping ${user?.name ?? 'a student'} manage their academic schedule.
 Today is ${todayStr} (${user?.timezone ?? 'America/New_York'}).
 
@@ -85,6 +89,9 @@ ${scheduleList || '(Nothing scheduled today)'}
 
 Student's courses:
 ${courseList || '(No courses yet)'}
+
+Recent learning reflections (use to personalize advice; do not invent reflections):
+${debriefLines}
 
 ---
 RULES — follow these exactly:
@@ -116,6 +123,8 @@ RULES — follow these exactly:
 7. **Schedule queries**: When the user asks what to work on or about their schedule, respond naturally using the task and schedule data above.
 
 8. **General chat**: For non-task conversation (motivation, study tips), just respond helpfully without an action block.
+
+9. **Learning reflections**: When "Recent learning reflections" above is not "(None)", incorporate them when relevant (study tips, what to review, scheduling encouragement). Only reference reflections that actually appear there — never fabricate past debriefs or confidence scores.
 
 Keep responses concise — 2–4 sentences of natural language, then the action block (if any).`;
 }

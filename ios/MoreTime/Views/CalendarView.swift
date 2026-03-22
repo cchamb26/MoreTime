@@ -324,21 +324,39 @@ struct DayDetailView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if !blocks.isEmpty {
-                            Text("Scheduled")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Scheduled")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text("Time on your calendar — class blocks or planned study sessions, not your Tasks list.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if taskStore.tasks.isEmpty {
+                                    Text("Add assignments on the Tasks tab; generate a schedule to turn them into blocks like these.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.horizontal, 4)
                             ForEach(blocks) { block in
                                 ScheduleBlockCard(block: block)
                             }
                         }
 
                         if !orphanDueTasks.isEmpty {
-                            Text("Due")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
-                                .padding(.top, blocks.isEmpty ? 0 : 4)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Due")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text("From your Tasks tab — due today but not covered by a scheduled block above.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.top, blocks.isEmpty ? 0 : 4)
 
                             ForEach(orphanDueTasks) { task in
                                 NavigationLink(value: task) {

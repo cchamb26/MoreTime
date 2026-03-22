@@ -203,8 +203,7 @@ MoreTime/
 │       │   ├── SettingsView.swift     # Settings, study prefs, courses & class schedule sheet
 │       │   ├── ScheduleGenerateView.swift  # Schedule generation UI
 │       │   ├── FileUploadView.swift   # File upload + task extraction
-│       │   ├── CourseManagementView.swift   # Course CRUD
-│       │   └── DebugLogView.swift     # Error log viewer
+│       │   └── CourseManagementView.swift   # Course CRUD
 │       ├── Stores/
 │       │   ├── AuthStore.swift        # Auth state management
 │       │   ├── TaskStore.swift        # Tasks + courses state

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TaskDetailView: View {
     @Environment(TaskStore.self) private var taskStore
+    @Environment(AuthStore.self) private var authStore
     @Environment(\.dismiss) private var dismiss
 
     private static let isoFormatter = ISO8601DateFormatter()
@@ -16,6 +17,7 @@ struct TaskDetailView: View {
     @State private var status: String
     @State private var selectedCourseId: String?
     @State private var isSaving = false
+    @State private var showLearningDebrief = false
 
     init(task: TaskItem) {
         self.task = task
@@ -98,12 +100,20 @@ struct TaskDetailView: View {
                 .disabled(title.isEmpty || isSaving)
             }
         }
+        .sheet(isPresented: $showLearningDebrief) {
+            LearningDebriefSheet(taskId: task.id, taskTitle: title) {
+                showLearningDebrief = false
+                dismiss()
+            }
+            .environment(authStore)
+        }
     }
 
     private func save() async {
         isSaving = true
         defer { isSaving = false }
 
+        let wasCompleted = (task.status == "completed")
         let dueDateStr = hasDueDate ? Self.isoFormatter.string(from: dueDate) : nil
 
         let request = UpdateTaskRequest(
@@ -117,7 +127,11 @@ struct TaskDetailView: View {
         )
 
         if await taskStore.updateTask(id: task.id, request) != nil {
-            dismiss()
+            if status == "completed" && !wasCompleted {
+                showLearningDebrief = true
+            } else {
+                dismiss()
+            }
         }
     }
 }
