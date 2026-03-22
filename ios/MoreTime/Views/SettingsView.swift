@@ -51,7 +51,7 @@ struct SettingsView: View {
                     if let prefsSaveMessage {
                         Text(prefsSaveMessage)
                             .font(.caption)
-                            .foregroundStyle(prefsSaveMessage == "Saved." ? .secondary : .red)
+                            .foregroundStyle(prefsSaveMessage == "Saved." ? Color.secondary : Color.red)
                     }
                 }
 
@@ -140,26 +140,6 @@ struct SettingsView: View {
         }
     }
 
-    private static func defaultTime(hour: Int, minute: Int) -> Date {
-        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        c.hour = hour
-        c.minute = minute
-        return Calendar.current.date(from: c) ?? Date()
-    }
-
-    private static func timeToday(fromHHmm s: String) -> Date? {
-        let parts = s.split(separator: ":").compactMap { Int($0) }
-        guard parts.count >= 2 else { return nil }
-        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        c.hour = parts[0]
-        c.minute = parts[1]
-        return Calendar.current.date(from: c)
-    }
-
-    private static func hhmm(from date: Date) -> String {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
-    }
 }
 
 // MARK: - Class schedule (courses + locked blocks)
@@ -182,9 +162,15 @@ struct ClassScheduleView: View {
     @State private var classLabel = ""
     @State private var classStart = SettingsView.defaultTime(hour: 9, minute: 0)
     @State private var classEnd = SettingsView.defaultTime(hour: 10, minute: 0)
+    @State private var repeatUntil = Self.defaultRepeatUntil
+    @State private var isAddingClasses = false
     @State private var blockToEdit: ScheduleBlock?
     @State private var courseToEdit: Course?
     @State private var addClassError: String?
+
+    private static var defaultRepeatUntil: Date {
+        Calendar.current.date(byAdding: .month, value: 4, to: Date()) ?? Date()
+    }
 
     private static let ymd: DateFormatter = {
         let f = DateFormatter()
@@ -284,6 +270,7 @@ struct ClassScheduleView: View {
 
                     DatePicker("Starts", selection: $classStart, displayedComponents: .hourAndMinute)
                     DatePicker("Ends", selection: $classEnd, displayedComponents: .hourAndMinute)
+                    DatePicker("Repeat until", selection: $repeatUntil, in: Date()..., displayedComponents: .date)
 
                     if let addClassError {
                         Text(addClassError)
@@ -291,10 +278,20 @@ struct ClassScheduleView: View {
                             .foregroundStyle(.red)
                     }
 
-                    Button("Add to schedule") {
+                    Button {
                         addClassesForSelectedDays()
+                    } label: {
+                        if isAddingClasses {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Adding classes...")
+                            }
+                        } else {
+                            Text("Add to schedule")
+                        }
                     }
-                    .disabled(selectedCourseId == nil || selectedWeekdays.isEmpty || !timesValid)
+                    .disabled(selectedCourseId == nil || selectedWeekdays.isEmpty || !timesValid || isAddingClasses)
                 }
 
                 Section("Scheduled classes (locked)") {
@@ -402,30 +399,37 @@ struct ClassScheduleView: View {
         let labelText = classLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? course.name
             : classLabel
+        let endDate = Calendar.current.startOfDay(for: repeatUntil)
 
+        isAddingClasses = true
         Task {
             let cal = Calendar.current
             let today = cal.startOfDay(for: Date())
+
             for weekday in selectedWeekdays.sorted() {
-                guard let next = cal.nextDate(
+                var cursor = cal.nextDate(
                     after: today,
                     matching: DateComponents(weekday: weekday),
                     matchingPolicy: .nextTimePreservingSmallerComponents
-                ) else { continue }
-
-                let request = CreateBlockRequest(
-                    taskId: nil,
-                    courseId: courseId,
-                    date: Self.ymd.string(from: next),
-                    startTime: startStr,
-                    endTime: endStr,
-                    isLocked: true,
-                    label: labelText
                 )
-                _ = await scheduleStore.createBlock(request)
+                while let date = cursor, date <= endDate {
+                    let request = CreateBlockRequest(
+                        taskId: nil,
+                        courseId: courseId,
+                        date: Self.ymd.string(from: date),
+                        startTime: startStr,
+                        endTime: endStr,
+                        isLocked: true,
+                        label: labelText
+                    )
+                    _ = await scheduleStore.createBlock(request)
+                    cursor = cal.date(byAdding: .weekOfYear, value: 1, to: date)
+                }
             }
+
             selectedWeekdays.removeAll()
             classLabel = ""
+            isAddingClasses = false
             await refreshBlocks()
         }
     }
@@ -492,6 +496,11 @@ extension SettingsView {
     fileprivate static func hhmm(from date: Date) -> String {
         StudyScheduleTime.hhmm(from: date)
     }
+
+    fileprivate static func timeToday(fromHHmm s: String) -> Date? {
+        StudyScheduleTime.timeToday(fromHHmm: s)
+    }
+
 }
 
 // MARK: - Edit locked block
