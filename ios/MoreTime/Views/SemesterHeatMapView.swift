@@ -587,42 +587,136 @@ func intensityColor(_ intensity: String) -> Color {
 
 // MARK: - Existing Files Picker
 
+private enum LibraryDateFilterMode: String, CaseIterable, Identifiable {
+    case all = "All"
+    case last7Days = "Last 7 days"
+    case last30Days = "Last 30 days"
+    case custom = "Custom range"
+
+    var id: String { rawValue }
+}
+
 struct ExistingFilesPickerView: View {
     @Environment(SemesterStore.self) private var store
     @Binding var selectedFiles: [SelectedFile]
     let onDismiss: () -> Void
 
     @State private var selected: Set<String> = []
+    @State private var filterMode: LibraryDateFilterMode = .all
+    @State private var customRangeStart = Calendar.current.startOfDay(for: Date())
+    @State private var customRangeEnd = Calendar.current.startOfDay(for: Date())
+    @State private var showCustomRangeSheet = false
+    @State private var showDeleteConfirmation = false
+    @State private var pendingDeleteId: String?
+    @State private var pendingDeleteName = ""
+    @State private var deletingIds: Set<String> = []
+
+    private var filteredFiles: [FileUploadResponse] {
+        let cal = Calendar.current
+        let now = Date()
+        switch filterMode {
+        case .all:
+            return store.uploadedFiles
+        case .last7Days:
+            guard let start = cal.date(byAdding: .day, value: -7, to: now) else { return [] }
+            return store.uploadedFiles.filter { file in
+                guard let d = Self.parseUploadedAt(file.createdAt) else { return false }
+                return d >= start && d <= now
+            }
+        case .last30Days:
+            guard let start = cal.date(byAdding: .day, value: -30, to: now) else { return [] }
+            return store.uploadedFiles.filter { file in
+                guard let d = Self.parseUploadedAt(file.createdAt) else { return false }
+                return d >= start && d <= now
+            }
+        case .custom:
+            let rangeStart = cal.startOfDay(for: customRangeStart)
+            guard let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: customRangeEnd)) else {
+                return []
+            }
+            return store.uploadedFiles.filter { file in
+                guard let d = Self.parseUploadedAt(file.createdAt) else { return false }
+                return d >= rangeStart && d < endExclusive
+            }
+        }
+    }
 
     var body: some View {
-        List(store.uploadedFiles) { file in
-            Button {
-                if selected.contains(file.id) {
-                    selected.remove(file.id)
-                } else {
-                    selected.insert(file.id)
-                }
-            } label: {
-                HStack {
-                    Image(systemName: selected.contains(file.id) ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selected.contains(file.id) ? .primary : .secondary)
-                    VStack(alignment: .leading) {
-                        Text(file.originalName)
-                            .font(.subheadline)
-                        Text(file.parseStatus.capitalized)
-                            .font(.caption)
-                            .foregroundStyle(.green)
+        Group {
+            if store.uploadedFiles.isEmpty {
+                ContentUnavailableView(
+                    "No files yet",
+                    systemImage: "folder",
+                    description: Text("Upload syllabi first, then pick them here.")
+                )
+            } else if filteredFiles.isEmpty {
+                ContentUnavailableView(
+                    "No files in this range",
+                    systemImage: "calendar.badge.exclamationmark",
+                    description: Text("Try a different date filter or choose “All”.")
+                )
+            } else {
+                List(filteredFiles) { file in
+                    Button {
+                        if selected.contains(file.id) {
+                            selected.remove(file.id)
+                        } else {
+                            selected.insert(file.id)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: selected.contains(file.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selected.contains(file.id) ? .primary : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.originalName)
+                                    .font(.subheadline)
+                                Text(Self.formatUploadedAt(file.createdAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if deletingIds.contains(file.id) {
+                                ProgressView()
+                                    .scaleEffect(0.85)
+                            }
+                        }
                     }
-                    Spacer()
+                    .buttonStyle(.plain)
+                    .disabled(deletingIds.contains(file.id))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingDeleteId = file.id
+                            pendingDeleteName = file.originalName
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .disabled(deletingIds.contains(file.id))
+                    }
                 }
             }
-            .buttonStyle(.plain)
         }
         .navigationTitle("Select Files")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { onDismiss() }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Uploaded", selection: $filterMode) {
+                        ForEach(LibraryDateFilterMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    if filterMode == .custom {
+                        Button("Edit date range") {
+                            showCustomRangeSheet = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Add \(selected.count)") {
@@ -641,8 +735,91 @@ struct ExistingFilesPickerView: View {
                 .disabled(selected.isEmpty)
             }
         }
+        .onChange(of: filterMode) { _, newValue in
+            if newValue == .custom {
+                showCustomRangeSheet = true
+            }
+        }
+        .sheet(isPresented: $showCustomRangeSheet) {
+            NavigationStack {
+                Form {
+                    DatePicker("From", selection: $customRangeStart, displayedComponents: .date)
+                    DatePicker("To", selection: $customRangeEnd, displayedComponents: .date)
+                }
+                .navigationTitle("Date range")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showCustomRangeSheet = false }
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete from library?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete “\(pendingDeleteName)”", role: .destructive) {
+                let id = pendingDeleteId
+                showDeleteConfirmation = false
+                pendingDeleteId = nil
+                pendingDeleteName = ""
+                if let id {
+                    Task { await performDelete(id: id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteId = nil
+                pendingDeleteName = ""
+            }
+        } message: {
+            Text("This removes the file from your library. It cannot be undone.")
+        }
         .task {
             await store.fetchUploadedFiles()
         }
+    }
+
+    private func performDelete(id: String) async {
+        await MainActor.run { deletingIds.insert(id) }
+        let ok = await store.deleteUploadedFile(id: id)
+        await MainActor.run {
+            deletingIds.remove(id)
+            if ok {
+                selected.remove(id)
+                selectedFiles.removeAll { $0.existingFileId == id }
+            }
+        }
+    }
+
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static let uploadedDisplayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    private static func parseUploadedAt(_ string: String?) -> Date? {
+        guard let string, !string.isEmpty else { return nil }
+        if let d = iso8601Fractional.date(from: string) { return d }
+        return iso8601.date(from: string)
+    }
+
+    private static func formatUploadedAt(_ string: String?) -> String {
+        guard let date = parseUploadedAt(string) else { return "Unknown date" }
+        return uploadedDisplayFormatter.string(from: date)
     }
 }

@@ -35,6 +35,18 @@ final class SemesterStore {
         }
     }
 
+    func deleteUploadedFile(id: String) async -> Bool {
+        do {
+            try await api.request("DELETE", path: "/files/\(id)")
+            uploadedFiles.removeAll { $0.id == id }
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "SemesterStore", operation: "deleteUploadedFile")
+            return false
+        }
+    }
+
     func uploadFiles(payloads: [(data: Data, fileName: String, mimeType: String)]) async -> [FileUploadResponse] {
         isUploading = true
         defer { isUploading = false }

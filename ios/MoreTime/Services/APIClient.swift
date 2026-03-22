@@ -126,6 +126,10 @@ final class APIClient {
             throw APIError.serverError(httpResponse.statusCode, errorMsg)
         }
 
+        if data.isEmpty, (200 ..< 300).contains(httpResponse.statusCode), T.self == EmptyResponse.self {
+            return EmptyResponse() as! T
+        }
+
         do {
             return try decoder.decode(T.self, from: data)
         } catch {

@@ -202,6 +202,43 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const supabase = getSupabase();
+
+    const { data: row, error: fetchError } = await supabase
+      .from('file_uploads')
+      .select('id, storage_path')
+      .eq('id', id)
+      .eq('user_id', req.user!.userId)
+      .single();
+
+    if (fetchError || !row) throw new NotFoundError('FileUpload', id);
+
+    const storagePath = row.storage_path as string;
+    if (storagePath) {
+      try {
+        await fs.unlink(storagePath);
+      } catch (unlinkErr: unknown) {
+        const code = unlinkErr && typeof unlinkErr === 'object' && 'code' in unlinkErr ? (unlinkErr as NodeJS.ErrnoException).code : undefined;
+        if (code !== 'ENOENT') throw unlinkErr;
+      }
+    }
+
+    const { error: deleteError } = await supabase
+      .from('file_uploads')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user!.userId);
+
+    if (deleteError) throw deleteError;
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:id/extract-tasks', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
