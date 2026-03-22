@@ -239,5 +239,29 @@ MoreTime/
 │   └── main_moretime.yml              # CI/CD pipeline
 └── .gitignore
 ```
+## Starting your own version
 
+#### backend
+ - npm install
+ - npm run dev
+#### required env keys
+###### Azure OpenAI
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_DEPLOYMENT_NAME=
+AZURE_OPENAI_ENDPOINT=
+
+###### Azure Speech Services
+AZURE_SPEECH_KEY=
+AZURE_SPEECH_REGION=
+
+###### Supabase
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+#### frontend
+- XCode
+- run and build project on Ios18.6+ client
+- point server connection to your local port address
+###### Development
+DEV_USER_ID=
 Environment variables in production are set via Azure App Settings, not `.env` files.
