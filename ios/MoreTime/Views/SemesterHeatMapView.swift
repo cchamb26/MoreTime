@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct SemesterHeatMapView: View {
     @Environment(SemesterStore.self) private var store
     @Environment(TaskStore.self) private var taskStore
+    @Environment(AuthStore.self) private var authStore
 
     @State private var isPickerPresented = false
     @State private var selectedFiles: [SelectedFile] = []
@@ -35,7 +36,18 @@ struct SemesterHeatMapView: View {
             .sheet(isPresented: $showExistingFiles) {
                 existingFilesSheet
             }
+            .task {
+                await loadPersistedSemesterPlanIfNeeded()
+            }
         }
+    }
+
+    /// Restores the single saved plan from profile preferences (one per user).
+    private func loadPersistedSemesterPlanIfNeeded() async {
+        guard store.semesterPlan == nil else { return }
+        await authStore.fetchProfile()
+        guard let plan = authStore.semesterPlanFromPreferences() else { return }
+        store.semesterPlan = plan
     }
 
     // MARK: - Setup Phase
@@ -330,8 +342,11 @@ struct SemesterHeatMapView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Menu {
                     Button {
-                        store.reset()
-                        selectedFiles.removeAll()
+                        Task {
+                            store.reset()
+                            selectedFiles.removeAll()
+                            _ = await authStore.persistSemesterPlan(nil)
+                        }
                     } label: {
                         Label("New Plan", systemImage: "arrow.counterclockwise")
                     }
@@ -390,6 +405,9 @@ struct SemesterHeatMapView: View {
 
         guard !fileIds.isEmpty else { return }
         await store.generatePlan(fileIds: fileIds, start: startStr, end: endStr)
+        if store.semesterPlan != nil {
+            _ = await authStore.persistSemesterPlan(store.semesterPlan)
+        }
     }
 
     private func mimeType(for url: URL) -> String {

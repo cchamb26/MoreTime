@@ -194,7 +194,7 @@ struct ClassScheduleView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Your courses") {
+                Section {
                     if taskStore.courses.isEmpty {
                         Text("No courses yet — add one below or when scheduling a class.")
                             .foregroundStyle(.secondary)
@@ -225,9 +225,16 @@ struct ClassScheduleView: View {
                         .onDelete { indexSet in
                             for index in indexSet {
                                 let course = taskStore.courses[index]
+                                if selectedCourseId == course.id { selectedCourseId = nil }
                                 Task { await taskStore.deleteCourse(id: course.id) }
                             }
                         }
+                    }
+                } header: {
+                    Text("Your courses")
+                } footer: {
+                    if !taskStore.courses.isEmpty {
+                        Text("Tap a course to edit or delete it. You can also swipe left on a course to remove it.")
                     }
                 }
 
@@ -294,17 +301,15 @@ struct ClassScheduleView: View {
                     .disabled(selectedCourseId == nil || selectedWeekdays.isEmpty || !timesValid || isAddingClasses)
                 }
 
-                Section("Scheduled classes (locked)") {
+                Section {
                     if lockedBlocks.isEmpty {
                         Text("No locked blocks yet")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(lockedBlocks) { block in
-                            Button {
-                                blockToEdit = block
-                            } label: {
-                                lockedBlockRow(block)
-                            }
+                            lockedBlockRow(block)
+                                .contentShape(Rectangle())
+                                .onTapGesture { blockToEdit = block }
                         }
                         .onDelete { offsets in
                             for index in offsets {
@@ -312,6 +317,12 @@ struct ClassScheduleView: View {
                                 Task { await scheduleStore.deleteBlock(id: id) }
                             }
                         }
+                    }
+                } header: {
+                    Text("Scheduled classes (locked)")
+                } footer: {
+                    if !lockedBlocks.isEmpty {
+                        Text("Tap a class to edit or remove it. Swipe left on a row to delete.")
                     }
                 }
             }
@@ -330,7 +341,11 @@ struct ClassScheduleView: View {
                         blockToEdit = nil
                         Task { await refreshBlocks() }
                     },
-                    onCancel: { blockToEdit = nil }
+                    onCancel: { blockToEdit = nil },
+                    onDeleted: {
+                        blockToEdit = nil
+                        Task { await refreshBlocks() }
+                    }
                 )
                 .environment(scheduleStore)
             }
@@ -338,7 +353,11 @@ struct ClassScheduleView: View {
                 EditCourseSheet(
                     course: course,
                     onSave: { courseToEdit = nil },
-                    onCancel: { courseToEdit = nil }
+                    onCancel: { courseToEdit = nil },
+                    onDeleted: {
+                        if selectedCourseId == course.id { selectedCourseId = nil }
+                        courseToEdit = nil
+                    }
                 )
                 .environment(taskStore)
             }
@@ -511,6 +530,7 @@ private struct EditLockedBlockSheet: View {
     let courses: [Course]
     var onSave: () -> Void
     var onCancel: () -> Void
+    var onDeleted: () -> Void
 
     @State private var label: String
     @State private var date: Date
@@ -519,6 +539,8 @@ private struct EditLockedBlockSheet: View {
     @State private var selectedCourseId: String?
     @State private var linkCourse: Bool
     @State private var errorText: String?
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
 
     private static let ymd: DateFormatter = {
         let f = DateFormatter()
@@ -526,11 +548,18 @@ private struct EditLockedBlockSheet: View {
         return f
     }()
 
-    init(block: ScheduleBlock, courses: [Course], onSave: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    init(
+        block: ScheduleBlock,
+        courses: [Course],
+        onSave: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onDeleted: @escaping () -> Void
+    ) {
         self.block = block
         self.courses = courses
         self.onSave = onSave
         self.onCancel = onCancel
+        self.onDeleted = onDeleted
         _label = State(initialValue: block.label ?? "")
         let parsed = Self.ymd.date(from: String(block.date.prefix(10))) ?? Date()
         _date = State(initialValue: parsed)
@@ -564,8 +593,26 @@ private struct EditLockedBlockSheet: View {
 
                 if let errorText {
                     Section {
-                        Text(errorText).foregroundStyle(.red).font(.caption)
+                        Text(errorText).foregroundStyle(Color.red).font(.caption)
                     }
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        HStack {
+                            if isDeleting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Delete from schedule")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isDeleting)
+                } footer: {
+                    Text("Removes this class block from your calendar. Your course and tasks are not deleted.")
                 }
             }
             .navigationTitle("Edit class")
@@ -576,8 +623,27 @@ private struct EditLockedBlockSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
+                        .disabled(isDeleting)
                 }
             }
+            .alert("Remove this class?", isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { await deleteBlock() }
+                }
+            } message: {
+                Text("This block will be removed from your schedule.")
+            }
+        }
+    }
+
+    private func deleteBlock() async {
+        isDeleting = true
+        defer { isDeleting = false }
+        if await scheduleStore.deleteBlock(id: block.id) {
+            onDeleted()
+        } else {
+            errorText = scheduleStore.error ?? "Could not delete."
         }
     }
 
@@ -621,14 +687,23 @@ private struct EditCourseSheet: View {
     let course: Course
     var onSave: () -> Void
     var onCancel: () -> Void
+    var onDeleted: () -> Void
 
     @State private var name: String
     @State private var color: String
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
 
-    init(course: Course, onSave: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    init(
+        course: Course,
+        onSave: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onDeleted: @escaping () -> Void
+    ) {
         self.course = course
         self.onSave = onSave
         self.onCancel = onCancel
+        self.onDeleted = onDeleted
         _name = State(initialValue: course.name)
         _color = State(initialValue: course.color)
     }
@@ -652,6 +727,24 @@ private struct EditCourseSheet: View {
                             .onTapGesture { color = hex }
                     }
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        HStack {
+                            if isDeleting {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Delete course")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isDeleting)
+                } footer: {
+                    Text("Deleting removes the course. Tasks stay in your list but are no longer linked to this course. Class blocks linked to this course may need to be updated.")
+                }
             }
             .navigationTitle("Edit course")
             .navigationBarTitleDisplayMode(.inline)
@@ -661,9 +754,25 @@ private struct EditCourseSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isDeleting)
                 }
             }
+            .alert("Delete this course?", isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { await deleteCourse() }
+                }
+            } message: {
+                Text("“\(course.name)” will be removed. This cannot be undone.")
+            }
+        }
+    }
+
+    private func deleteCourse() async {
+        isDeleting = true
+        defer { isDeleting = false }
+        if await taskStore.deleteCourse(id: course.id) {
+            onDeleted()
         }
     }
 

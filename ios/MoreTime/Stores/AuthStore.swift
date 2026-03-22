@@ -79,8 +79,11 @@ final class AuthStore {
     }
 
     /// Merges into existing profile `preferences` and PATCHes `/auth/me` (server replaces whole JSON object).
-    func updatePreferences(merging updates: [String: Any]) async -> Bool {
+    func updatePreferences(merging updates: [String: Any] = [:], removingKeys: Set<String> = []) async -> Bool {
         var merged = Self.preferencesDictionary(from: currentUser)
+        for key in removingKeys {
+            merged.removeValue(forKey: key)
+        }
         for (key, value) in updates {
             merged[key] = value
         }
@@ -98,6 +101,30 @@ final class AuthStore {
             self.error = error.localizedDescription
             return false
         }
+    }
+
+    private static let semesterPlanPreferenceKey = "semesterPlan"
+
+    /// Saves or clears the single persisted semester heat-map plan (JSON string in `preferences`).
+    func persistSemesterPlan(_ plan: SemesterPlan?) async -> Bool {
+        if let plan {
+            guard let data = try? JSONEncoder().encode(plan),
+                  let jsonString = String(data: data, encoding: .utf8) else { return false }
+            return await updatePreferences(merging: [Self.semesterPlanPreferenceKey: jsonString])
+        }
+        return await updatePreferences(merging: [:], removingKeys: Set([Self.semesterPlanPreferenceKey]))
+    }
+
+    func semesterPlanFromPreferences() -> SemesterPlan? {
+        let dict = Self.preferencesDictionary(from: currentUser)
+        guard let raw = dict[Self.semesterPlanPreferenceKey] else { return nil }
+        let jsonString: String? = {
+            if let s = raw as? String { return s }
+            if let s = raw as? NSString { return s as String }
+            return nil
+        }()
+        guard let jsonString, let data = jsonString.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SemesterPlan.self, from: data)
     }
 
     static func preferencesDictionary(from profile: UserProfile?) -> [String: Any] {

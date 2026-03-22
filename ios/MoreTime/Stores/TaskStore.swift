@@ -148,6 +148,10 @@ final class TaskStore {
         do {
             try await api.request("DELETE", path: "/courses/\(id)") as Void
             courses.removeAll { $0.id == id }
+            for idx in tasks.indices where tasks[idx].courseId == id {
+                tasks[idx].courseId = nil
+                tasks[idx].course = nil
+            }
             await invokeScheduleRefreshCallback()
             return true
         } catch {
