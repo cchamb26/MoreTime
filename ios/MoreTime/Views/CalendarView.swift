@@ -279,15 +279,17 @@ struct ScheduleBlockCard: View {
                 .frame(width: 44)
 
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: block.task?.course?.color ?? "#6B7280"))
+                    .fill(Color(hex: block.classCourse?.color ?? block.task?.course?.color ?? "#6B7280"))
                     .frame(width: 4)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(block.task?.title ?? block.label ?? "Block")
+                    Text(block.isLocked
+                        ? (block.label ?? block.classCourse?.name ?? "Class")
+                        : (block.task?.title ?? block.label ?? "Block"))
                         .font(.subheadline.weight(.medium))
                         .lineLimit(isExpanded ? nil : 1)
 
-                    if let courseName = block.task?.course?.name {
+                    if let courseName = block.classCourse?.name ?? block.task?.course?.name {
                         Text(courseName)
                             .font(.caption)
                             .foregroundStyle(.secondary)

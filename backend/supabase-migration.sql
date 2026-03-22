@@ -77,6 +77,7 @@ create table public.schedule_blocks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   task_id uuid references public.tasks(id) on delete set null,
+  course_id uuid references public.courses(id) on delete set null,
   date date not null,
   start_time text not null,
   end_time text not null,
@@ -87,6 +88,7 @@ create table public.schedule_blocks (
 );
 create index idx_schedule_blocks_user_date on public.schedule_blocks(user_id, date);
 create index idx_schedule_blocks_task_id on public.schedule_blocks(task_id);
+create index idx_schedule_blocks_course_id on public.schedule_blocks(course_id);
 
 -- File Uploads
 create table public.file_uploads (
@@ -133,3 +135,7 @@ create policy "Users can manage own tasks" on public.tasks for all using (auth.u
 create policy "Users can manage own schedule" on public.schedule_blocks for all using (auth.uid() = user_id);
 create policy "Users can manage own files" on public.file_uploads for all using (auth.uid() = user_id);
 create policy "Users can manage own chat" on public.chat_messages for all using (auth.uid() = user_id);
+
+-- Additive: safe no-op if column already exists (e.g. fresh install above)
+alter table public.schedule_blocks add column if not exists course_id uuid references public.courses(id) on delete set null;
+create index if not exists idx_schedule_blocks_course_id on public.schedule_blocks(course_id);

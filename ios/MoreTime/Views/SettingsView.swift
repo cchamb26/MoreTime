@@ -2,13 +2,13 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AuthStore.self) private var authStore
-    @State private var preferredStartTime = "09:00"
-    @State private var preferredEndTime = "22:00"
+    @State private var studyStart = SettingsView.defaultTime(hour: 9, minute: 0)
+    @State private var studyEnd = SettingsView.defaultTime(hour: 22, minute: 0)
     @State private var maxHoursPerDay = 8.0
     @State private var breakDuration = 15.0
-    @State private var showCourseManagement = false
+    @State private var prefsSaveMessage: String?
+    @State private var showClassSchedule = false
     @State private var showFileUpload = false
-    @State private var showLockedBlocks = false
     @State private var showDebugLog = false
 
     var body: some View {
@@ -23,42 +23,43 @@ struct SettingsView: View {
                 }
 
                 Section("Study Preferences") {
-                    HStack {
-                        Text("Start Time")
-                        Spacer()
-                        Text(preferredStartTime)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("End Time")
-                        Spacer()
-                        Text(preferredEndTime)
-                            .foregroundStyle(.secondary)
-                    }
+                    DatePicker("Preferred start", selection: $studyStart, displayedComponents: .hourAndMinute)
+                    DatePicker("Preferred end", selection: $studyEnd, displayedComponents: .hourAndMinute)
 
                     VStack(alignment: .leading) {
-                        Text("Max Hours/Day: \(maxHoursPerDay, specifier: "%.0f")")
+                        Text("Max hours per day: \(maxHoursPerDay, specifier: "%.0f")")
                         Slider(value: $maxHoursPerDay, in: 2...16, step: 1)
                     }
 
                     VStack(alignment: .leading) {
-                        Text("Break Duration: \(breakDuration, specifier: "%.0f") min")
+                        Text("Break duration: \(breakDuration, specifier: "%.0f") min")
                         Slider(value: $breakDuration, in: 5...60, step: 5)
+                    }
+
+                    Button("Save study preferences") {
+                        Task {
+                            let ok = await authStore.updatePreferences(merging: [
+                                "preferredStartTime": Self.hhmm(from: studyStart),
+                                "preferredEndTime": Self.hhmm(from: studyEnd),
+                                "maxHoursPerDay": Int(maxHoursPerDay),
+                                "breakDuration": Int(breakDuration),
+                            ])
+                            prefsSaveMessage = ok ? "Saved." : (authStore.error ?? "Could not save.")
+                        }
+                    }
+
+                    if let prefsSaveMessage {
+                        Text(prefsSaveMessage)
+                            .font(.caption)
+                            .foregroundStyle(prefsSaveMessage == "Saved." ? .secondary : .red)
                     }
                 }
 
                 Section("Manage") {
                     Button {
-                        showCourseManagement = true
+                        showClassSchedule = true
                     } label: {
-                        Label("Courses", systemImage: "paintpalette")
-                    }
-
-                    Button {
-                        showLockedBlocks = true
-                    } label: {
-                        Label("Class Schedule (Locked Blocks)", systemImage: "lock")
+                        Label("Courses & class schedule", systemImage: "calendar.badge.clock")
                     }
 
                     Button {
@@ -100,114 +101,576 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .sheet(isPresented: $showCourseManagement) {
-                CourseManagementView()
+            .onAppear {
+                loadStudyPreferencesFromProfile()
+            }
+            .onChange(of: authStore.currentUser?.id) { _, _ in
+                loadStudyPreferencesFromProfile()
+            }
+            .sheet(isPresented: $showClassSchedule) {
+                ClassScheduleView()
             }
             .sheet(isPresented: $showFileUpload) {
                 FileUploadView(courseId: nil)
-            }
-            .sheet(isPresented: $showLockedBlocks) {
-                LockedBlocksView()
             }
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
             }
         }
     }
+
+    private func loadStudyPreferencesFromProfile() {
+        prefsSaveMessage = nil
+        let d = AuthStore.preferencesDictionary(from: authStore.currentUser)
+        if let s = d["preferredStartTime"] as? String {
+            studyStart = Self.timeToday(fromHHmm: s) ?? Self.defaultTime(hour: 9, minute: 0)
+        }
+        if let s = d["preferredEndTime"] as? String {
+            studyEnd = Self.timeToday(fromHHmm: s) ?? Self.defaultTime(hour: 22, minute: 0)
+        }
+        if let m = d["maxHoursPerDay"] as? Double {
+            maxHoursPerDay = m
+        } else if let m = d["maxHoursPerDay"] as? Int {
+            maxHoursPerDay = Double(m)
+        }
+        if let b = d["breakDuration"] as? Double {
+            breakDuration = b
+        } else if let b = d["breakDuration"] as? Int {
+            breakDuration = Double(b)
+        }
+    }
+
+    private static func defaultTime(hour: Int, minute: Int) -> Date {
+        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        c.hour = hour
+        c.minute = minute
+        return Calendar.current.date(from: c) ?? Date()
+    }
+
+    private static func timeToday(fromHHmm s: String) -> Date? {
+        let parts = s.split(separator: ":").compactMap { Int($0) }
+        guard parts.count >= 2 else { return nil }
+        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        c.hour = parts[0]
+        c.minute = parts[1]
+        return Calendar.current.date(from: c)
+    }
+
+    private static func hhmm(from date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
 }
 
-struct LockedBlocksView: View {
+// MARK: - Class schedule (courses + locked blocks)
+
+private let classSchedulePresetColors = [
+    "#EF4444", "#F97316", "#EAB308", "#22C55E",
+    "#06B6D4", "#3B82F6", "#8B5CF6", "#EC4899",
+    "#6B7280", "#78716C",
+]
+
+struct ClassScheduleView: View {
+    @Environment(TaskStore.self) private var taskStore
     @Environment(ScheduleStore.self) private var scheduleStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var label = ""
-    @State private var selectedDay = 1 // Monday
-    @State private var startTime = "09:00"
-    @State private var endTime = "10:00"
+    @State private var newCourseName = ""
+    @State private var newCourseColor = "#6B7280"
+    @State private var selectedCourseId: String?
+    @State private var selectedWeekdays: Set<Int> = []
+    @State private var classLabel = ""
+    @State private var classStart = SettingsView.defaultTime(hour: 9, minute: 0)
+    @State private var classEnd = SettingsView.defaultTime(hour: 10, minute: 0)
+    @State private var blockToEdit: ScheduleBlock?
+    @State private var courseToEdit: Course?
+    @State private var addClassError: String?
 
-    private let days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    private static let ymd: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    private var lockedBlocks: [ScheduleBlock] {
+        scheduleStore.blocks.filter(\.isLocked).sorted {
+            if $0.date != $1.date { return $0.date < $1.date }
+            return $0.startTime < $1.startTime
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Add Recurring Block") {
-                    TextField("Label (e.g., CS310 Lecture)", text: $label)
+                Section("Your courses") {
+                    if taskStore.courses.isEmpty {
+                        Text("No courses yet — add one below or when scheduling a class.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(taskStore.courses) { course in
+                            Button {
+                                courseToEdit = course
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(Color(hex: course.color))
+                                        .frame(width: 12, height: 12)
+                                    Text(course.name)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if let count = course._count?.tasks {
+                                        Text("\(count) tasks")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .onDelete { indexSet in
+                            for index in indexSet {
+                                let course = taskStore.courses[index]
+                                Task { await taskStore.deleteCourse(id: course.id) }
+                            }
+                        }
+                    }
+                }
 
-                    Picker("Day", selection: $selectedDay) {
-                        ForEach(0..<7) { i in
-                            Text(days[i]).tag(i)
+                Section("Add course") {
+                    TextField("Course name", text: $newCourseName)
+                    presetColorGrid(selection: $newCourseColor)
+                    Button("Add course") {
+                        Task {
+                            if let c = await taskStore.createCourse(name: newCourseName, color: newCourseColor) {
+                                newCourseName = ""
+                                selectedCourseId = c.id
+                            }
+                        }
+                    }
+                    .disabled(newCourseName.isEmpty)
+                }
+
+                Section("Add class to calendar") {
+                    Picker("Course", selection: $selectedCourseId) {
+                        Text("Select a course").tag(nil as String?)
+                        ForEach(taskStore.courses) { c in
+                            Text(c.name).tag(Optional(c.id))
                         }
                     }
 
-                    HStack {
-                        Text("Time")
-                        Spacer()
-                        Text("\(startTime) - \(endTime)")
-                            .foregroundStyle(.secondary)
+                    TextField("Label (optional)", text: $classLabel)
+                        .textInputAutocapitalization(.words)
+
+                    ForEach(1...7, id: \.self) { weekday in
+                        Toggle(isOn: Binding(
+                            get: { selectedWeekdays.contains(weekday) },
+                            set: { on in
+                                if on { selectedWeekdays.insert(weekday) }
+                                else { selectedWeekdays.remove(weekday) }
+                            }
+                        )) {
+                            Text(Self.weekdayName(weekday))
+                        }
                     }
 
-                    Button("Add Block") {
-                        addLockedBlock()
+                    DatePicker("Starts", selection: $classStart, displayedComponents: .hourAndMinute)
+                    DatePicker("Ends", selection: $classEnd, displayedComponents: .hourAndMinute)
+
+                    if let addClassError {
+                        Text(addClassError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
-                    .disabled(label.isEmpty)
+
+                    Button("Add to schedule") {
+                        addClassesForSelectedDays()
+                    }
+                    .disabled(selectedCourseId == nil || selectedWeekdays.isEmpty || !timesValid)
                 }
 
-                Section("Current Locked Blocks") {
-                    let locked = scheduleStore.blocks.filter(\.isLocked)
-                    if locked.isEmpty {
-                        Text("No locked blocks")
+                Section("Scheduled classes (locked)") {
+                    if lockedBlocks.isEmpty {
+                        Text("No locked blocks yet")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(locked) { block in
-                            HStack {
-                                Text(block.label ?? "Block")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(block.startTime)-\(block.endTime)")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                        ForEach(lockedBlocks) { block in
+                            Button {
+                                blockToEdit = block
+                            } label: {
+                                lockedBlockRow(block)
+                            }
+                        }
+                        .onDelete { offsets in
+                            for index in offsets {
+                                let id = lockedBlocks[index].id
+                                Task { await scheduleStore.deleteBlock(id: id) }
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Class Schedule")
+            .navigationTitle("Courses & schedule")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(item: $blockToEdit) { block in
+                EditLockedBlockSheet(
+                    block: block,
+                    courses: taskStore.courses,
+                    onSave: {
+                        blockToEdit = nil
+                        Task { await refreshBlocks() }
+                    },
+                    onCancel: { blockToEdit = nil }
+                )
+                .environment(scheduleStore)
+            }
+            .sheet(item: $courseToEdit) { course in
+                EditCourseSheet(
+                    course: course,
+                    onSave: { courseToEdit = nil },
+                    onCancel: { courseToEdit = nil }
+                )
+                .environment(taskStore)
+            }
+            .task {
+                await taskStore.fetchCourses()
+                await refreshBlocks()
+            }
         }
     }
 
-    private static let dateFormatter: DateFormatter = {
+    private var timesValid: Bool {
+        StudyScheduleTime.hhmm(from: classStart) < StudyScheduleTime.hhmm(from: classEnd)
+    }
+
+    private func lockedBlockRow(_ block: ScheduleBlock) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Color(hex: block.classCourse?.color ?? "#6B7280"))
+                .frame(width: 10, height: 10)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(block.label ?? block.classCourse?.name ?? "Class")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text("\(weekdayLabel(for: block.date)) · \(block.date)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("\(block.startTime)–\(block.endTime)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func weekdayLabel(for ymdString: String) -> String {
+        guard let d = Self.ymd.date(from: String(ymdString.prefix(10))) else { return "" }
+        return Self.weekdayFormatter.string(from: d)
+    }
+
+    private static func weekdayName(_ weekday: Int) -> String {
+        let symbols = Calendar.current.weekdaySymbols
+        let idx = (weekday - 1) % 7
+        return symbols[idx]
+    }
+
+    private func addClassesForSelectedDays() {
+        addClassError = nil
+        guard let courseId = selectedCourseId else { return }
+        guard let course = taskStore.courses.first(where: { $0.id == courseId }) else { return }
+        guard !selectedWeekdays.isEmpty else { return }
+        guard timesValid else {
+            addClassError = "End time must be after start time."
+            return
+        }
+
+        let startStr = StudyScheduleTime.hhmm(from: classStart)
+        let endStr = StudyScheduleTime.hhmm(from: classEnd)
+        let labelText = classLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? course.name
+            : classLabel
+
+        Task {
+            let cal = Calendar.current
+            let today = cal.startOfDay(for: Date())
+            for weekday in selectedWeekdays.sorted() {
+                guard let next = cal.nextDate(
+                    after: today,
+                    matching: DateComponents(weekday: weekday),
+                    matchingPolicy: .nextTimePreservingSmallerComponents
+                ) else { continue }
+
+                let request = CreateBlockRequest(
+                    taskId: nil,
+                    courseId: courseId,
+                    date: Self.ymd.string(from: next),
+                    startTime: startStr,
+                    endTime: endStr,
+                    isLocked: true,
+                    label: labelText
+                )
+                _ = await scheduleStore.createBlock(request)
+            }
+            selectedWeekdays.removeAll()
+            classLabel = ""
+            await refreshBlocks()
+        }
+    }
+
+    private func refreshBlocks() async {
+        let cal = Calendar.current
+        let now = Date()
+        guard let start = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return }
+        guard let end = cal.date(byAdding: .month, value: 3, to: start) else { return }
+        await scheduleStore.fetchBlocks(startDate: start, endDate: end)
+    }
+
+    @ViewBuilder
+    private func presetColorGrid(selection: Binding<String>) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 10) {
+            ForEach(classSchedulePresetColors, id: \.self) { color in
+                Circle()
+                    .fill(Color(hex: color))
+                    .frame(width: 32, height: 32)
+                    .overlay {
+                        if color == selection.wrappedValue {
+                            Image(systemName: "checkmark")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .onTapGesture { selection.wrappedValue = color }
+            }
+        }
+    }
+}
+
+// MARK: - Small helpers for ClassScheduleView
+
+private enum StudyScheduleTime {
+    static func defaultTime(hour: Int, minute: Int) -> Date {
+        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        c.hour = hour
+        c.minute = minute
+        return Calendar.current.date(from: c) ?? Date()
+    }
+
+    static func hhmm(from date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
+    static func timeToday(fromHHmm s: String) -> Date? {
+        let parts = s.split(separator: ":").compactMap { Int($0) }
+        guard parts.count >= 2 else { return nil }
+        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        c.hour = parts[0]
+        c.minute = parts[1]
+        return Calendar.current.date(from: c)
+    }
+}
+
+// Bridge SettingsView.defaultTime for ClassScheduleView file-private access
+extension SettingsView {
+    fileprivate static func defaultTime(hour: Int, minute: Int) -> Date {
+        StudyScheduleTime.defaultTime(hour: hour, minute: minute)
+    }
+
+    fileprivate static func hhmm(from date: Date) -> String {
+        StudyScheduleTime.hhmm(from: date)
+    }
+}
+
+// MARK: - Edit locked block
+
+private struct EditLockedBlockSheet: View {
+    @Environment(ScheduleStore.self) private var scheduleStore
+    let block: ScheduleBlock
+    let courses: [Course]
+    var onSave: () -> Void
+    var onCancel: () -> Void
+
+    @State private var label: String
+    @State private var date: Date
+    @State private var start: Date
+    @State private var end: Date
+    @State private var selectedCourseId: String?
+    @State private var linkCourse: Bool
+    @State private var errorText: String?
+
+    private static let ymd: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
 
-    private func addLockedBlock() {
-        let calendar = Calendar.current
-        let today = Date()
+    init(block: ScheduleBlock, courses: [Course], onSave: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.block = block
+        self.courses = courses
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _label = State(initialValue: block.label ?? "")
+        let parsed = Self.ymd.date(from: String(block.date.prefix(10))) ?? Date()
+        _date = State(initialValue: parsed)
+        _start = State(initialValue: StudyScheduleTime.timeToday(fromHHmm: block.startTime) ?? StudyScheduleTime.defaultTime(hour: 9, minute: 0))
+        _end = State(initialValue: StudyScheduleTime.timeToday(fromHHmm: block.endTime) ?? StudyScheduleTime.defaultTime(hour: 10, minute: 0))
+        _selectedCourseId = State(initialValue: block.courseId)
+        _linkCourse = State(initialValue: block.courseId != nil)
+    }
 
-        // Find next occurrence of selected day
-        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today)
-        components.weekday = selectedDay + 1
-        guard let targetDate = calendar.date(from: components) else { return }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Label", text: $label)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    DatePicker("Start", selection: $start, displayedComponents: .hourAndMinute)
+                    DatePicker("End", selection: $end, displayedComponents: .hourAndMinute)
+                }
 
-        Task {
-            let request = CreateBlockRequest(
-                taskId: nil,
-                date: Self.dateFormatter.string(from: targetDate),
-                startTime: startTime,
-                endTime: endTime,
-                isLocked: true,
-                label: label
-            )
-            if await scheduleStore.createBlock(request) != nil {
-                label = ""
+                Section("Course color") {
+                    Toggle("Link to course", isOn: $linkCourse)
+                    if linkCourse {
+                        Picker("Course", selection: $selectedCourseId) {
+                            Text("None").tag(nil as String?)
+                            ForEach(courses) { c in
+                                Text(c.name).tag(Optional(c.id))
+                            }
+                        }
+                    }
+                }
+
+                if let errorText {
+                    Section {
+                        Text(errorText).foregroundStyle(.red).font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Edit class")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                }
             }
         }
+    }
+
+    private func save() async {
+        errorText = nil
+        let startS = StudyScheduleTime.hhmm(from: start)
+        let endS = StudyScheduleTime.hhmm(from: end)
+        guard startS < endS else {
+            errorText = "End time must be after start time."
+            return
+        }
+
+        var req = UpdateBlockRequest()
+        req.label = label.isEmpty ? nil : label
+        req.date = Self.ymd.string(from: date)
+        req.startTime = startS
+        req.endTime = endS
+        if linkCourse {
+            if let id = selectedCourseId {
+                req.courseId = id
+                req.setCourseIdNull = false
+            } else {
+                req.setCourseIdNull = true
+            }
+        } else {
+            req.setCourseIdNull = true
+        }
+
+        if await scheduleStore.updateBlock(id: block.id, req) != nil {
+            onSave()
+        } else {
+            errorText = scheduleStore.error ?? "Could not save."
+        }
+    }
+}
+
+// MARK: - Edit course
+
+private struct EditCourseSheet: View {
+    @Environment(TaskStore.self) private var taskStore
+    let course: Course
+    var onSave: () -> Void
+    var onCancel: () -> Void
+
+    @State private var name: String
+    @State private var color: String
+
+    init(course: Course, onSave: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.course = course
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _name = State(initialValue: course.name)
+        _color = State(initialValue: course.color)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $name)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 10) {
+                    ForEach(classSchedulePresetColors, id: \.self) { hex in
+                        Circle()
+                            .fill(Color(hex: hex))
+                            .frame(width: 32, height: 32)
+                            .overlay {
+                                if hex == color {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .onTapGesture { color = hex }
+                    }
+                }
+            }
+            .navigationTitle("Edit course")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let changedName = trimmed != course.name
+        let changedColor = color != course.color
+        guard changedName || changedColor else {
+            onSave()
+            return
+        }
+        _ = await taskStore.updateCourse(
+            id: course.id,
+            name: changedName ? trimmed : nil,
+            color: changedColor ? color : nil
+        )
+        onSave()
     }
 }

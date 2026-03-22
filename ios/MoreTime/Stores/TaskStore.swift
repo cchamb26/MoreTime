@@ -111,6 +111,21 @@ final class TaskStore {
         }
     }
 
+    func updateCourse(id: String, name: String?, color: String?) async -> Course? {
+        do {
+            let body = UpdateCourseRequest(name: name, color: color)
+            let course: Course = try await api.request("PATCH", path: "/courses/\(id)", body: body)
+            if let idx = courses.firstIndex(where: { $0.id == id }) {
+                courses[idx] = course
+            }
+            return course
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "TaskStore", operation: "updateCourse")
+            return nil
+        }
+    }
+
     func deleteCourse(id: String) async -> Bool {
         do {
             try await api.request("DELETE", path: "/courses/\(id)") as Void

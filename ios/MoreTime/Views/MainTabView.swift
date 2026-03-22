@@ -32,7 +32,7 @@ struct MainTabView: View {
             let now = Date()
             let calendar = Calendar.current
             let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-            let end = calendar.date(byAdding: .month, value: 1, to: start)!
+            let end = calendar.date(byAdding: .month, value: 3, to: start)!
 
             async let fetchTasks: Void = taskStore.fetchTasks()
             async let fetchCourses: Void = taskStore.fetchCourses()

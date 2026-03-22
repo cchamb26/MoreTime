@@ -66,6 +66,22 @@ final class ScheduleStore {
         }
     }
 
+    func updateBlock(id: String, _ request: UpdateBlockRequest) async -> ScheduleBlock? {
+        do {
+            let block: ScheduleBlock = try await api.request("PATCH", path: "/schedule/\(id)", body: request)
+            if let idx = blocks.firstIndex(where: { $0.id == id }) {
+                blocks[idx] = block
+            } else {
+                blocks.append(block)
+            }
+            return block
+        } catch {
+            self.error = error.localizedDescription
+            log.log(error, source: "ScheduleStore", operation: "updateBlock")
+            return nil
+        }
+    }
+
     func deleteBlock(id: String) async -> Bool {
         do {
             try await api.request("DELETE", path: "/schedule/\(id)") as Void

@@ -77,4 +77,35 @@ final class AuthStore {
             }
         }
     }
+
+    /// Merges into existing profile `preferences` and PATCHes `/auth/me` (server replaces whole JSON object).
+    func updatePreferences(merging updates: [String: Any]) async -> Bool {
+        var merged = Self.preferencesDictionary(from: currentUser)
+        for (key, value) in updates {
+            merged[key] = value
+        }
+        let codablePrefs = merged.mapValues { AnyCodable($0) }
+
+        struct PatchBody: Codable {
+            var preferences: [String: AnyCodable]
+        }
+
+        do {
+            let user: UserProfile = try await api.request("PATCH", path: "/auth/me", body: PatchBody(preferences: codablePrefs))
+            currentUser = user
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    static func preferencesDictionary(from profile: UserProfile?) -> [String: Any] {
+        guard let prefs = profile?.preferences else { return [:] }
+        var out: [String: Any] = [:]
+        for (key, any) in prefs {
+            out[key] = any.value
+        }
+        return out
+    }
 }

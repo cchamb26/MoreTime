@@ -15,8 +15,11 @@ const querySchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
+const optionalUuid = z.union([z.string().uuid(), z.null()]).optional();
+
 const createBlockSchema = z.object({
   taskId: z.string().optional(),
+  courseId: optionalUuid,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
@@ -26,6 +29,24 @@ const createBlockSchema = z.object({
 
 const updateBlockSchema = createBlockSchema.partial();
 
+const scheduleBlockSelect = `*, tasks:task_id(id, title, priority, courses:course_id(id, name, color)), class_course:courses!schedule_blocks_course_id_fkey(id, name, color)`;
+
+function mapBlockRow(row: Record<string, unknown>) {
+  const { tasks, user_id: _uid, class_course, ...rest } = row;
+  const taskData = tasks as Record<string, unknown> | null;
+  let task = null;
+  if (taskData) {
+    const { courses, ...taskRest } = taskData;
+    task = { ...toCamel(taskRest), course: courses ? toCamel(courses) : null };
+  }
+  const classCourseRaw = class_course as Record<string, unknown> | null;
+  return {
+    ...toCamel(rest),
+    task,
+    classCourse: classCourseRaw ? toCamel(classCourseRaw) : null,
+  };
+}
+
 router.get('/', validate(querySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { startDate, endDate } = req.query as z.infer<typeof querySchema>;
@@ -33,7 +54,7 @@ router.get('/', validate(querySchema, 'query'), async (req: Request, res: Respon
 
     const { data, error } = await supabase
       .from('schedule_blocks')
-      .select('*, tasks:task_id(id, title, priority, courses:course_id(id, name, color))')
+      .select(scheduleBlockSelect)
       .eq('user_id', req.user!.userId)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -42,16 +63,7 @@ router.get('/', validate(querySchema, 'query'), async (req: Request, res: Respon
 
     if (error) throw error;
 
-    const blocks = (data ?? []).map((row: Record<string, unknown>) => {
-      const { tasks, user_id, ...rest } = row as Record<string, unknown>;
-      const taskData = tasks as Record<string, unknown> | null;
-      let task = null;
-      if (taskData) {
-        const { courses, ...taskRest } = taskData;
-        task = { ...toCamel(taskRest), course: courses ? toCamel(courses) : null };
-      }
-      return { ...toCamel(rest), task };
-    });
+    const blocks = (data ?? []).map((row: Record<string, unknown>) => mapBlockRow(row));
 
     res.json(blocks);
   } catch (err) {
@@ -71,19 +83,19 @@ router.post(
         .insert({
           user_id: req.user!.userId,
           task_id: req.body.taskId ?? null,
+          course_id: req.body.courseId === undefined ? null : req.body.courseId,
           date: req.body.date,
           start_time: req.body.startTime,
           end_time: req.body.endTime,
           is_locked: req.body.isLocked ?? false,
           label: req.body.label ?? null,
         })
-        .select('*, tasks:task_id(id, title)')
+        .select(scheduleBlockSelect)
         .single();
 
       if (error) throw error;
 
-      const { tasks, user_id, ...rest } = data as Record<string, unknown>;
-      res.status(201).json({ ...toCamel(rest), task: tasks ? toCamel(tasks) : null });
+      res.status(201).json(mapBlockRow(data as Record<string, unknown>));
     } catch (err) {
       next(err);
     }
@@ -105,19 +117,19 @@ router.patch(
       if (req.body.endTime !== undefined) updates.end_time = req.body.endTime;
       if (req.body.isLocked !== undefined) updates.is_locked = req.body.isLocked;
       if (req.body.label !== undefined) updates.label = req.body.label;
+      if (req.body.courseId !== undefined) updates.course_id = req.body.courseId;
 
       const { data, error } = await supabase
         .from('schedule_blocks')
         .update(updates)
         .eq('id', id)
         .eq('user_id', req.user!.userId)
-        .select('*, tasks:task_id(id, title)')
+        .select(scheduleBlockSelect)
         .single();
 
       if (error) throw new NotFoundError('ScheduleBlock', id);
 
-      const { tasks, user_id, ...rest } = data as Record<string, unknown>;
-      res.json({ ...toCamel(rest), task: tasks ? toCamel(tasks) : null });
+      res.json(mapBlockRow(data as Record<string, unknown>));
     } catch (err) {
       next(err);
     }

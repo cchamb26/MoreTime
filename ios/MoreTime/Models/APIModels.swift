@@ -44,6 +44,11 @@ struct CreateCourseRequest: Codable {
     let metadata: [String: AnyCodable]?
 }
 
+struct UpdateCourseRequest: Codable {
+    let name: String?
+    let color: String?
+}
+
 // MARK: - Task
 
 struct TaskItem: Codable, Identifiable, Hashable {
@@ -99,14 +104,23 @@ struct UpdateTaskRequest: Codable {
 
 // MARK: - Schedule
 
+/// Course linked to a schedule block (locked class), distinct from task-embedded course.
+struct ClassCourseRef: Codable, Hashable {
+    let id: String
+    let name: String
+    let color: String
+}
+
 struct ScheduleBlock: Codable, Identifiable {
     let id: String
     var taskId: String?
+    var courseId: String?
     var date: String
     var startTime: String
     var endTime: String
     var isLocked: Bool
     var label: String?
+    var classCourse: ClassCourseRef?
     var task: TaskRef?
 
     struct TaskRef: Codable {
@@ -125,11 +139,45 @@ struct ScheduleBlock: Codable, Identifiable {
 
 struct CreateBlockRequest: Codable {
     let taskId: String?
+    let courseId: String?
     let date: String
     let startTime: String
     let endTime: String
     let isLocked: Bool?
     let label: String?
+}
+
+struct UpdateBlockRequest: Encodable {
+    var taskId: String?
+    var courseId: String?
+    var date: String?
+    var startTime: String?
+    var endTime: String?
+    var isLocked: Bool?
+    var label: String?
+    /// When true, send JSON null for `courseId` to clear the link.
+    var setCourseIdNull: Bool = false
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(taskId, forKey: .taskId)
+        try c.encodeIfPresent(date, forKey: .date)
+        try c.encodeIfPresent(startTime, forKey: .startTime)
+        try c.encodeIfPresent(endTime, forKey: .endTime)
+        try c.encodeIfPresent(isLocked, forKey: .isLocked)
+        try c.encodeIfPresent(label, forKey: .label)
+        if setCourseIdNull {
+            try c.encodeNil(forKey: .courseId)
+        } else {
+            try c.encodeIfPresent(courseId, forKey: .courseId)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case taskId, courseId, date, startTime, endTime, isLocked, label
+    }
 }
 
 struct GenerateScheduleResponse: Codable {

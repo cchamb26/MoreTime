@@ -63,7 +63,7 @@ final class CachedScheduleBlock {
         self.isLocked = block.isLocked
         self.label = block.label
         self.taskTitle = block.task?.title
-        self.courseColor = block.task?.course?.color
+        self.courseColor = block.classCourse?.color ?? block.task?.course?.color
         self.lastSynced = Date()
     }
 }
