@@ -18,6 +18,7 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 - [Environment Variables](#environment-variables)
 - [API Reference](#api-reference)
 - [Database Schema](#database-schema)
+- [Tests](#tests)
 - [Deployment](#deployment)
 
 ---
@@ -145,9 +146,10 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 | Database     | Supabase (PostgreSQL)                            |
 | Auth         | Supabase Auth (Admin API + session tokens)       |
 | AI           | Azure OpenAI (GPT-4o for chat/vision/scheduling) |
-| Speech       | Azure OpenAI (gpt-4o-transcribe-diarize)         |
+| Speech       | Azure OpenAI audio API (`gpt-4o-transcribe-diarize`; same endpoint/key as chat) |
 | File Parsing | pdf-parse, mammoth (DOCX), GPT-4o vision (OCR)   |
 | Validation   | Zod                                              |
+| Testing      | Vitest (`backend/tests`)                         |
 | Deployment   | Azure Web App via GitHub Actions                 |
 
 ---
@@ -183,6 +185,7 @@ MoreTime/
 │   │       ├── env.ts                # Environment variable validation
 │   │       ├── errors.ts             # Custom error classes
 │   │       └── transform.ts          # snake_case ↔ camelCase
+│   ├── tests/                        # Vitest (validation, scheduling)
 │   ├── supabase-migration.sql        # Database schema + RLS policies
 │   ├── package.json
 │   └── tsconfig.json
@@ -225,7 +228,6 @@ MoreTime/
 │
 ├── .github/workflows/
 │   └── main_moretime.yml              # CI/CD pipeline
-├── .env                               # Environment variables (not committed)
 └── .gitignore
 ```
 
@@ -264,10 +266,11 @@ The backend does **not** require the Supabase anon key. Use the anon key only if
 
 ```bash
 cd backend
-cp ../.env.example .env   # or create .env manually (see Environment Variables below)
-npm install
-npm run dev               # starts dev server with hot reload on port 3000
+npm install   # runs `tsc` via postinstall to emit `dist/`
+npm run dev   # starts dev server with hot reload (default port 3000)
 ```
+
+Set the variables from [Environment Variables](#environment-variables) in your shell or IDE before starting the server. The backend reads `process.env` only; it does not load a `.env` file unless you add a loader (for example `dotenv`) or configure your editor to inject env vars.
 
 The dev server runs at `http://localhost:3000`. Test with:
 
@@ -283,25 +286,24 @@ curl http://localhost:3000/health
 
 #### Dev Bypass (Optional)
 
-For development without authentication, set `DEV_BYPASS_AUTH=true` in your backend `.env`. The iOS app has a corresponding `#if DEBUG` block in `AuthStore.swift` that auto-authenticates with a dev user. Remove or disable this block when testing real auth flows.
+For development without authentication, set `DEV_BYPASS_AUTH=true` in the environment that runs the API (same as your other backend variables). The iOS app has a corresponding `#if DEBUG` block in `AuthStore.swift` that auto-authenticates with a dev user. Remove or disable this block when testing real auth flows.
 
 ---
 
 ## Environment Variables
 
-Create a `.env` file in the project root (used by the backend):
+Required variables are checked in `backend/src/utils/env.ts` the first time the API needs Supabase or Azure OpenAI (lazy init). `DEV_BYPASS_AUTH` and `NODE_ENV` are read directly from `process.env`. Supply variables via your shell, IDE run configuration, or hosting provider (e.g. Azure App Settings). They are **not** loaded from a `.env` file unless you add that yourself.
 
 | Variable                       | Required | Description                                                    |
 | ------------------------------ | -------- | -------------------------------------------------------------- |
 | `SUPABASE_URL`                 | Yes      | Your Supabase project URL (e.g., `https://xxx.supabase.co`)    |
-| `SUPABASE_SERVICE_ROLE_KEY`    | Yes      | Supabase service role key (secret — used for admin operations) |
-| `AZURE_OPENAI_ENDPOINT`        | Yes      | Azure OpenAI resource endpoint                                 |
-| `AZURE_OPENAI_API_KEY`         | Yes      | Azure OpenAI API key                                           |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | No       | Chat model deployment name (default: `gpt-4o`)                 |
-| `AZURE_SPEECH_KEY`             | No       | Azure Speech key (for voice features)                          |
-| `AZURE_SPEECH_REGION`          | No       | Azure Speech region (default: `eastus`)                        |
+| `SUPABASE_SERVICE_ROLE_KEY`    | Yes      | Supabase service role key (secret — server-side only)          |
+| `AZURE_OPENAI_ENDPOINT`        | Yes      | Azure OpenAI resource endpoint (base URL)                      |
+| `AZURE_OPENAI_API_KEY`         | Yes      | Azure OpenAI API key (chat, vision, scheduling, transcription) |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | No       | Chat / vision deployment name (default: `gpt-4o`)            |
 | `PORT`                         | No       | Server port (default: `3000`)                                  |
-| `DEV_BYPASS_AUTH`              | No       | Set to `true` to skip auth in development                      |
+| `DEV_BYPASS_AUTH`              | No       | Set to `true` to skip auth in development ([Dev Bypass](#dev-bypass-optional)) |
+| `NODE_ENV`                     | No       | Set to `production` to hide error details in API responses     |
 
 ---
 
@@ -403,16 +405,27 @@ All tables use UUIDs as primary keys. Row Level Security (RLS) is enabled on eve
 | `courses`         | `id`, `user_id`, `name`, `color`                                                                |                                                                                                                                         |
 | `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status`      | `course_id` set null on course delete                                                                                                   |
 | `schedule_blocks` | `id`, `user_id`, `task_id`, `course_id`, `date`, `start_time`, `end_time`, `is_locked`, `label` | Optional `course_id` → `courses` for class blocks; API embeds `classCourse` when FK `schedule_blocks_course_id_fkey` exists in Supabase |
-| `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `parsed_content`, `parse_status`                 | Status: pending → parsing → completed/failed                                                                                            |
+| `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `storage_path`, `mime_type`, `file_size`, `parsed_content`, `parse_status`, `parsed_at` | Upload metadata + async parse pipeline; status: pending → parsing → completed/failed                                                  |
 | `chat_messages`   | `id`, `user_id`, `role`, `content`, `session_id`, `timestamp`                                   | Roles: user, assistant                                                                                                                  |
 
 See `backend/supabase-migration.sql` for the complete schema, indexes, trigger function, and RLS policies.
 
 ---
 
+## Tests
+
+From the `backend` directory:
+
+```bash
+npm test        # run once (Vitest)
+npm run test:watch
+```
+
+---
+
 ## Deployment
 
-The backend deploys to **Azure Web App** via GitHub Actions on every push to `main` that modifies `backend/**`.
+The backend deploys to **Azure Web App** via GitHub Actions when `main` changes under `backend/**` or when the workflow file `.github/workflows/main_moretime.yml` changes. You can also run the workflow manually (**Actions → workflow_dispatch**).
 
 ### CI/CD Pipeline (`.github/workflows/main_moretime.yml`)
 
