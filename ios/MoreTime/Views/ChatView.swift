@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @Environment(ChatStore.self) private var chatStore
@@ -6,7 +7,22 @@ struct ChatView: View {
     @Environment(ScheduleStore.self) private var scheduleStore
     @State private var inputText = ""
     @State private var showVoice = false
+    @State private var isFileImporterPresented = false
     @FocusState private var isInputFocused: Bool
+
+    private var canSend: Bool {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let completed = chatStore.pendingAttachmentFiles.filter { $0.parseStatus == "completed" }
+        let parsing = chatStore.pendingAttachmentFiles.contains {
+            $0.parseStatus == "pending" || $0.parseStatus == "parsing"
+        }
+        let failed = chatStore.pendingAttachmentFiles.contains { $0.parseStatus == "failed" }
+
+        if chatStore.isLoading || chatStore.isPreparingAttachments { return false }
+        if parsing || failed { return false }
+        if !trimmed.isEmpty { return true }
+        return !completed.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -59,6 +75,21 @@ struct ChatView: View {
 
                 Divider()
 
+                if !chatStore.pendingAttachmentFiles.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(chatStore.pendingAttachmentFiles) { file in
+                                ChatPendingAttachmentChip(file: file) {
+                                    chatStore.removePendingAttachment(id: file.id)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 6)
+                    }
+                    .background(.bar.opacity(0.5))
+                }
+
                 // Input bar
                 HStack(spacing: 12) {
                     Button {
@@ -69,6 +100,15 @@ struct ChatView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    Button {
+                        isFileImporterPresented = true
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .disabled(chatStore.isLoading || chatStore.isPreparingAttachments)
+
                     TextField("Message", text: $inputText, axis: .vertical)
                         .lineLimit(1...4)
                         .textFieldStyle(.plain)
@@ -78,9 +118,9 @@ struct ChatView: View {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(inputText.isEmpty ? .secondary : .primary)
+                            .foregroundStyle(canSend ? .primary : .secondary)
                     }
-                    .disabled(inputText.isEmpty || chatStore.isLoading)
+                    .disabled(!canSend)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 10)
@@ -98,12 +138,30 @@ struct ChatView: View {
             .sheet(isPresented: $showVoice) {
                 VoiceInputView()
             }
+            .fileImporter(
+                isPresented: $isFileImporterPresented,
+                allowedContentTypes: [.pdf, .plainText, .png, .jpeg,
+                    UTType(filenameExtension: "docx") ?? .data],
+                allowsMultipleSelection: true
+            ) { result in
+                guard case .success(let urls) = result else { return }
+                Task { await chatStore.addAttachments(from: urls) }
+            }
+            .overlay {
+                if chatStore.isPreparingAttachments {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                    ProgressView("Uploading…")
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
         }
     }
 
     private func send() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard canSend else { return }
+        let text = inputText
         inputText = ""
         Task {
             await chatStore.sendMessage(text)
@@ -129,19 +187,79 @@ struct ChatView: View {
 struct ChatBubbleView: View {
     let bubble: ChatBubble
 
+    private var trimmedContent: String {
+        bubble.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         HStack {
             if bubble.role == "user" { Spacer(minLength: 60) }
 
-            Text(bubble.content)
-                .font(.subheadline)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .foregroundStyle(bubble.role == "user" ? Color(.systemBackground) : Color.primary)
-                .background(bubble.role == "user" ? Color.primary : Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
+            Group {
+                if bubble.role == "user" {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if !bubble.attachmentNames.isEmpty {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                ForEach(bubble.attachmentNames, id: \.self) { name in
+                                    Label(name, systemImage: "doc.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(Color(.systemBackground).opacity(0.9))
+                                }
+                            }
+                        }
+                        if !trimmedContent.isEmpty {
+                            Text(bubble.content)
+                                .font(.subheadline)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(Color(.systemBackground))
+                    .background(Color.primary, in: RoundedRectangle(cornerRadius: 18))
+                } else {
+                    Text(bubble.content)
+                        .font(.subheadline)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(Color.primary)
+                        .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
 
             if bubble.role == "assistant" { Spacer(minLength: 60) }
         }
+    }
+}
+
+private struct ChatPendingAttachmentChip: View {
+    let file: FileUploadResponse
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.fill")
+                .font(.caption)
+            Text(file.originalName)
+                .font(.caption)
+                .lineLimit(1)
+            if file.parseStatus == "pending" || file.parseStatus == "parsing" {
+                ProgressView()
+                    .scaleEffect(0.7)
+            } else if file.parseStatus == "failed" {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.gray.opacity(0.15), in: Capsule())
     }
 }
 

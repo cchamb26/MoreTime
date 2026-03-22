@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import { getSupabase } from '../utils/supabase.js';
+import { ValidationError } from '../utils/errors.js';
 import { chatCompletion } from './ai.js';
 import { generateSchedule } from './scheduling.js';
+
+/** Max characters injected from attached file text into a single chat completion (approximate token guard). */
+const MAX_ATTACHMENT_INJECT_CHARS = 80_000;
 
 interface ChatResult {
   sessionId: string;
@@ -116,19 +120,101 @@ RULES — follow these exactly:
 Keep responses concise — 2–4 sentences of natural language, then the action block (if any).`;
 }
 
+function buildAugmentedUserContent(
+  trimmedMessage: string,
+  files: Array<{ original_name: string; parsed_content: string }>,
+): string {
+  let out = `Use the attached document text below to schedule tasks and deadlines when relevant.
+
+${trimmedMessage || '(User sent only file attachments.)'}`;
+
+  let used = out.length;
+
+  for (const f of files) {
+    const header = `\n\n--- File: ${f.original_name} ---\n`;
+    const raw = f.parsed_content;
+    const budget = MAX_ATTACHMENT_INJECT_CHARS - used - header.length;
+    if (budget <= 0) {
+      out += '\n\n[Additional file content omitted: size limit reached.]';
+      break;
+    }
+    let chunk = raw;
+    if (chunk.length > budget) {
+      chunk = chunk.slice(0, budget) + '\n[…truncated…]';
+    }
+    out += header + chunk;
+    used = out.length;
+  }
+
+  return out;
+}
+
 export async function handleChatMessage(
   userId: string,
   message: string,
   sessionId?: string,
+  fileIds?: string[],
 ): Promise<ChatResult> {
   const supabase = getSupabase();
   const sid = sessionId || crypto.randomUUID();
+  const trimmedMessage = message.trim();
+  const ids = fileIds?.filter(Boolean) ?? [];
 
-  // Save user message
+  let attachmentRows: Array<{ original_name: string; parsed_content: string }> = [];
+  if (ids.length > 0) {
+    const { data: rows, error } = await supabase
+      .from('file_uploads')
+      .select('id, original_name, parse_status, parsed_content')
+      .eq('user_id', userId)
+      .in('id', ids);
+
+    if (error) throw error;
+
+    if (!rows || rows.length !== ids.length) {
+      throw new ValidationError('One or more attached files were not found or do not belong to you.');
+    }
+
+    const byId = new Map(
+      rows.map((row) => {
+        const r = row as Record<string, unknown>;
+        return [r.id as string, r];
+      }),
+    );
+
+    for (const id of ids) {
+      const r = byId.get(id);
+      if (!r) {
+        throw new ValidationError('One or more attached files were not found or do not belong to you.');
+      }
+      const name = r.original_name as string;
+      if (r.parse_status !== 'completed') {
+        throw new ValidationError(
+          `File "${name}" is not ready yet (parse status: ${r.parse_status}). Wait for parsing to finish and try again.`,
+        );
+      }
+      const text = (r.parsed_content as string | null)?.trim();
+      if (!text) {
+        throw new ValidationError(`File "${name}" has no extracted text.`);
+      }
+      attachmentRows.push({ original_name: name, parsed_content: text });
+    }
+  }
+
+  let storedContent = trimmedMessage;
+  if (attachmentRows.length > 0) {
+    const names = attachmentRows.map((f) => f.original_name);
+    const suffix = `[Attachments: ${names.join(', ')}]`;
+    storedContent = trimmedMessage ? `${trimmedMessage}\n${suffix}` : suffix;
+  }
+
+  const augmentedForModel =
+    attachmentRows.length > 0 ? buildAugmentedUserContent(trimmedMessage, attachmentRows) : storedContent;
+
+  // Save user message (short form; not full file text)
   await supabase.from('chat_messages').insert({
     user_id: userId,
     role: 'user',
-    content: message,
+    content: storedContent,
     session_id: sid,
   });
 
@@ -141,14 +227,22 @@ export async function handleChatMessage(
     .order('timestamp')
     .limit(20);
 
-  // Build messages for AI
+  // Build messages for AI — use augmented text only for the latest user turn
   const systemContent = await buildSystemContext(userId);
+  const historyRows = history ?? [];
+  const mappedHistory = historyRows.map((m: Record<string, unknown>, index: number) => {
+    const isLastUser =
+      index === historyRows.length - 1 && m.role === 'user' && attachmentRows.length > 0;
+    const content = isLastUser ? augmentedForModel : (m.content as string);
+    return {
+      role: m.role as 'user' | 'assistant',
+      content,
+    };
+  });
+
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemContent },
-    ...(history ?? []).map((m: Record<string, unknown>) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content as string,
-    })),
+    ...mappedHistory,
   ];
 
   const response = await chatCompletion(messages);

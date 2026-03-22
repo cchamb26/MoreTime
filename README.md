@@ -35,6 +35,7 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 ### AI Chat Assistant
 
 - Context-aware chat that knows your tasks, schedule, and courses
+- **Paperclip attachments:** upload assignment PDFs/DOCX/images from chat; after parsing, the assistant uses the document text to schedule tasks (same upload + parse pipeline as **Files**)
 - Automatically detects and creates tasks from natural conversation (e.g., "I have a CS310 paper due Friday")
 - Auto-generates schedule blocks whenever a task is created via chat
 - Persistent conversation history with session management
@@ -358,7 +359,9 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 
 | Method | Path       | Body                      | Response                                               |
 | ------ | ---------- | ------------------------- | ------------------------------------------------------ |
-| `POST` | `/message` | `{ message, sessionId? }` | `{ sessionId, response, action?, scheduleGenerated? }` |
+| `POST` | `/message` | `{ message?, sessionId?, fileIds? }` — provide a non-empty `message` and/or at least one `fileId` (max 5) | `{ sessionId, response, action?, scheduleGenerated? }` |
+
+**Attachments:** Upload files with `POST /files/upload`, poll `GET /files/:id` until `parseStatus` is `completed`, then send their IDs in `fileIds`. The server injects parsed text into the model for that turn only (not stored in full in chat history). Chat messages store a short `[Attachments: …]` line instead.
 
 The AI may return an `action` of type `task_created` with the created task data. When this happens, the schedule is automatically regenerated in the background.
 

@@ -189,9 +189,30 @@ struct GenerateScheduleResponse: Codable {
 
 // MARK: - Chat
 
-struct ChatRequest: Codable {
+struct ChatRequest: Encodable {
     let message: String
     let sessionId: String?
+    /// Uploaded file IDs (`GET /files/:id` must show `parseStatus == completed` before sending).
+    let fileIds: [String]?
+
+    init(message: String, sessionId: String?, fileIds: [String]? = nil) {
+        self.message = message
+        self.sessionId = sessionId
+        self.fileIds = fileIds
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(message, forKey: .message)
+        try c.encodeIfPresent(sessionId, forKey: .sessionId)
+        if let fileIds, !fileIds.isEmpty {
+            try c.encode(fileIds, forKey: .fileIds)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case message, sessionId, fileIds
+    }
 }
 
 struct ChatResponse: Codable {
