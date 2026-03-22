@@ -189,6 +189,40 @@ struct VoiceChatResponse: Codable {
     let response: String
 }
 
+// MARK: - Semester Plan
+
+struct SemesterPlan: Codable {
+    let weeks: [SemesterWeek]
+    let crunchWeeks: [String]
+    let totalEvents: Int
+    let semesterStart: String
+    let semesterEnd: String
+}
+
+struct SemesterWeek: Codable, Identifiable {
+    var id: String { weekStart }
+    let weekStart: String
+    let weekEnd: String
+    let totalEstimatedHours: Double
+    let intensity: String
+    let events: [SemesterEvent]
+}
+
+struct SemesterEvent: Codable, Identifiable {
+    var id: String { "\(courseName)-\(title)-\(dueDate)" }
+    let courseName: String
+    let title: String
+    let dueDate: String
+    let estimatedHours: Double
+    let type: String
+}
+
+struct SemesterPlanRequest: Codable {
+    let fileIds: [String]
+    let semesterStart: String
+    let semesterEnd: String
+}
+
 // MARK: - Utility
 
 struct AnyCodable: Codable {

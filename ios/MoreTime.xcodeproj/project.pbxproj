@@ -34,6 +34,8 @@
 		A10000025 /* ErrorLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000025 /* ErrorLogger.swift */; };
 		A10000026 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000026 /* ErrorBanner.swift */; };
 		A10000027 /* DebugLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000027 /* DebugLogView.swift */; };
+		A10000029 /* SemesterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000029 /* SemesterStore.swift */; };
+		A10000030 /* SemesterHeatMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* SemesterHeatMapView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +66,8 @@
 		B10000025 /* ErrorLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorLogger.swift; sourceTree = "<group>"; };
 		B10000026 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		B10000027 /* DebugLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogView.swift; sourceTree = "<group>"; };
+		B10000029 /* SemesterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemesterStore.swift; sourceTree = "<group>"; };
+		B10000030 /* SemesterHeatMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemesterHeatMapView.swift; sourceTree = "<group>"; };
 		C10000001 /* MoreTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MoreTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -127,6 +131,7 @@
 				B10000008 /* ChatStore.swift */,
 				B10000009 /* ScheduleStore.swift */,
 				B10000010 /* TaskStore.swift */,
+				B10000029 /* SemesterStore.swift */,
 			);
 			path = Stores;
 			sourceTree = "<group>";
@@ -147,6 +152,7 @@
 				B10000021 /* TaskListView.swift */,
 				B10000022 /* VoiceInputView.swift */,
 				B10000027 /* DebugLogView.swift */,
+				B10000030 /* SemesterHeatMapView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -263,6 +269,8 @@
 				A10000025 /* ErrorLogger.swift in Sources */,
 				A10000026 /* ErrorBanner.swift in Sources */,
 				A10000027 /* DebugLogView.swift in Sources */,
+				A10000029 /* SemesterStore.swift in Sources */,
+				A10000030 /* SemesterHeatMapView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

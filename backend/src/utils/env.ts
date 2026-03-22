@@ -2,7 +2,6 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   SUPABASE_URL: z.string(),
-  SUPABASE_ANON_KEY: z.string(),
   SUPABASE_SERVICE_ROLE_KEY: z.string(),
   AZURE_OPENAI_ENDPOINT: z.string(),
   AZURE_OPENAI_API_KEY: z.string(),

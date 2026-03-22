@@ -6,8 +6,10 @@ import { getSupabase } from '../utils/supabase.js';
 import { authGuard } from '../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { parseFile } from '../services/fileParser.js';
-import { extractTasksFromContent, detectDocumentType, breakdownAssignment } from '../services/ai.js';
+import { extractTasksFromContent, detectDocumentType, breakdownAssignment, generateSemesterPlan } from '../services/ai.js';
+import { groupEventsIntoWeeks } from '../services/scheduling.js';
 import { toCamel } from '../utils/transform.js';
+import { z } from 'zod';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -107,6 +109,62 @@ async function parseFileInBackground(fileId: string, filePath: string, mimeType:
       .eq('id', fileId);
   }
 }
+
+const semesterPlanSchema = z.object({
+  fileIds: z.array(z.string().uuid()).min(1).max(10),
+  semesterStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  semesterEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+router.post('/semester-plan', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = semesterPlanSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+    const { fileIds, semesterStart, semesterEnd } = parsed.data;
+    const supabase = getSupabase();
+
+    const { data: files, error } = await supabase
+      .from('file_uploads')
+      .select('id, parsed_content, parse_status, course_id, original_name')
+      .eq('user_id', req.user!.userId)
+      .in('id', fileIds);
+
+    if (error) throw error;
+    if (!files || files.length === 0) throw new ValidationError('No matching files found');
+
+    const incomplete = files.filter((f: Record<string, unknown>) => f.parse_status !== 'completed');
+    if (incomplete.length > 0) {
+      const names = incomplete.map((f: Record<string, unknown>) => f.original_name).join(', ');
+      throw new ValidationError(`Files not yet parsed: ${names}`);
+    }
+
+    const courseIds = [...new Set(files.map((f: Record<string, unknown>) => f.course_id).filter(Boolean))];
+    let courseMap: Record<string, string> = {};
+    if (courseIds.length > 0) {
+      const { data: courses } = await supabase
+        .from('courses')
+        .select('id, name')
+        .in('id', courseIds);
+      if (courses) {
+        courseMap = Object.fromEntries(courses.map((c: Record<string, unknown>) => [c.id, c.name as string]));
+      }
+    }
+
+    const parsedSyllabi = files.map((f: Record<string, unknown>) => ({
+      courseName: f.course_id ? (courseMap[f.course_id as string] ?? (f.original_name as string)) : (f.original_name as string),
+      content: f.parsed_content as string,
+    }));
+
+    const events = await generateSemesterPlan(parsedSyllabi, semesterStart, semesterEnd);
+    const result = groupEventsIntoWeeks(events, semesterStart, semesterEnd);
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

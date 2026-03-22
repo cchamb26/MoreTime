@@ -1,7 +1,80 @@
 import { getSupabase } from '../utils/supabase.js';
-import { generateScheduleBlocks, ScheduleBlockInput } from './ai.js';
+import { generateScheduleBlocks, ScheduleBlockInput, SemesterEvent } from './ai.js';
 import { ValidationError } from '../utils/errors.js';
 import { toCamel } from '../utils/transform.js';
+
+// MARK: - Semester Heat Map
+
+export interface SemesterWeek {
+  weekStart: string;
+  weekEnd: string;
+  totalEstimatedHours: number;
+  intensity: 'low' | 'medium' | 'high' | 'critical';
+  events: SemesterEvent[];
+}
+
+export interface SemesterPlanResult {
+  weeks: SemesterWeek[];
+  crunchWeeks: string[];
+  totalEvents: number;
+  semesterStart: string;
+  semesterEnd: string;
+}
+
+function getIntensity(hours: number): 'low' | 'medium' | 'high' | 'critical' {
+  if (hours <= 5) return 'low';
+  if (hours <= 10) return 'medium';
+  if (hours <= 15) return 'high';
+  return 'critical';
+}
+
+export function groupEventsIntoWeeks(
+  events: SemesterEvent[],
+  semesterStart: string,
+  semesterEnd: string,
+): SemesterPlanResult {
+  const weeks: SemesterWeek[] = [];
+  const current = new Date(semesterStart);
+
+  // Align to Monday
+  const day = current.getDay();
+  const diff = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
+  current.setDate(current.getDate() + diff);
+
+  const end = new Date(semesterEnd);
+
+  while (current <= end) {
+    const weekStart = current.toISOString().split('T')[0];
+    const weekEndDate = new Date(current);
+    weekEndDate.setDate(weekEndDate.getDate() + 6);
+    const weekEnd = weekEndDate.toISOString().split('T')[0];
+
+    const weekEvents = events.filter((e) => e.dueDate >= weekStart && e.dueDate <= weekEnd);
+    const totalHours = weekEvents.reduce((sum, e) => sum + e.estimatedHours, 0);
+
+    weeks.push({
+      weekStart,
+      weekEnd,
+      totalEstimatedHours: Math.round(totalHours * 10) / 10,
+      intensity: getIntensity(totalHours),
+      events: weekEvents,
+    });
+
+    current.setDate(current.getDate() + 7);
+  }
+
+  const crunchWeeks = weeks
+    .filter((w) => w.intensity === 'critical' || w.intensity === 'high')
+    .map((w) => w.weekStart);
+
+  return {
+    weeks,
+    crunchWeeks,
+    totalEvents: events.length,
+    semesterStart,
+    semesterEnd,
+  };
+}
 
 interface ScheduleResult {
   blocksCreated: number;

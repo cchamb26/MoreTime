@@ -40,7 +40,7 @@ app.use('/courses', courseRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/schedule', scheduleRoutes);
 app.use('/chat', aiLimiter, chatRoutes);
-app.use('/files', fileRoutes);
+app.use('/files', aiLimiter, fileRoutes);
 app.use('/voice', aiLimiter, voiceRoutes);
 
 // Health check

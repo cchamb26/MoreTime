@@ -1,0 +1,404 @@
+# MoreTime
+
+AI-powered study schedule optimizer for students. MoreTime helps you manage coursework, extract tasks from syllabi, chat with an AI assistant that understands your workload, and generate optimized day-by-day study plans — all from a native iOS app backed by a Node.js API.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Supabase Setup](#supabase-setup)
+  - [Backend Setup](#backend-setup)
+  - [iOS Setup](#ios-setup)
+- [Environment Variables](#environment-variables)
+- [API Reference](#api-reference)
+- [Database Schema](#database-schema)
+- [Deployment](#deployment)
+
+---
+
+## Features
+
+### Task Management
+
+- Create, edit, and delete tasks with due dates, priority levels (1–5), estimated hours, and course assignments
+- Group tasks by course with color-coded indicators
+- Sort by due date, priority, or creation date
+- Swipe-to-complete and swipe-to-delete gestures
+- Mark tasks as pending, in-progress, or completed
+
+### AI Chat Assistant
+
+- Context-aware chat that knows your tasks, schedule, and courses
+- Automatically detects and creates tasks from natural conversation (e.g., "I have a CS310 paper due Friday")
+- Auto-generates schedule blocks whenever a task is created via chat
+- Persistent conversation history with session management
+- Suggestion chips for quick prompts
+
+### Document Upload & Task Extraction
+
+- Upload PDF, DOCX, TXT, or image files (syllabi, assignment sheets)
+- AI-powered document classification (syllabus vs. single assignment)
+- Syllabi: extracts all assignments, exams, and deadlines with estimated hours
+- Assignments: breaks down a single deliverable into actionable subtasks spread across available days
+- OCR fallback for scanned PDFs and images via GPT-4o vision
+
+### Schedule Generation
+
+- AI analyzes all pending tasks, deadlines, priorities, and locked blocks to produce an optimal study plan
+- Respects student preferences (study hours, max hours/day, break duration)
+- Never schedules over locked blocks (classes, work, etc.)
+- Validates generated blocks for time conflicts and format correctness with up to 3 retry attempts
+- Auto-escalates priority of overdue tasks
+- Each block includes a specific label describing what to work on during that session
+
+### Voice Input
+
+- Record audio and send to AI chat via voice
+- Azure OpenAI transcription (gpt-4o-transcribe-diarize)
+- Real-time audio level visualization with waveform display
+
+### Calendar View
+
+- Monthly calendar grid with color-coded block indicators per day
+- Day detail view showing all scheduled blocks with time, task, and course info
+- Navigate between months, jump to today
+- Locked blocks (recurring classes) shown with lock icon
+
+### Course Management
+
+- Create courses with custom names and hex colors
+- All tasks and schedule blocks are associated with courses
+- Task count displayed per course
+
+---
+
+## Architecture
+
+```
+┌──────────────────┐         ┌──────────────────────┐
+│   iOS App        │  HTTP   │   Express API         │
+│   (SwiftUI)      │ ◄─────► │   (Node.js + TS)      │
+│                  │         │                        │
+│  @Observable     │         │  Routes → Services     │
+│  Stores ──► API  │         │       ↓                │
+│  Client          │         │  ┌──────────┐          │
+│                  │         │  │ Supabase │ Auth + DB │
+│  Keychain tokens │         │  └──────────┘          │
+│                  │         │  ┌──────────────────┐  │
+│                  │         │  │ Azure OpenAI     │  │
+│                  │         │  │ Chat, Vision,    │  │
+│                  │         │  │ Scheduling,      │  │
+│                  │         │  │ Transcription    │  │
+│                  │         │  └──────────────────┘  │
+└──────────────────┘         └────────────────────────┘
+```
+
+### Backend
+
+- **Express** routes handle HTTP requests with Zod validation middleware
+- **Supabase** for authentication (Admin API for user creation, session tokens for auth) and Postgres database
+- **Azure OpenAI** for all AI features: chat completions, document parsing, schedule generation, image OCR, and audio transcription
+- **Service layer** separates business logic (chat context building, schedule optimization, file parsing) from route handlers
+- **snake_case ↔ camelCase** transform layer between Supabase (snake) and API responses (camel)
+- Rate limiting: 200 req/15 min global, 20 req/min for AI endpoints
+
+### iOS
+
+- **@Observable stores** (`AuthStore`, `TaskStore`, `ScheduleStore`, `ChatStore`) manage state and are injected via SwiftUI's `.environment()`
+- **APIClient** singleton handles all networking with automatic token refresh on 401 responses
+- **KeychainHelper** stores auth tokens securely
+- **ErrorLogger** captures and surfaces API errors via toast banners and a debug log
+- Targets iOS 17+ using `@Observable` (not Combine)
+
+---
+
+## Tech Stack
+
+| Layer        | Technology                                       |
+| ------------ | ------------------------------------------------ |
+| iOS App      | Swift, SwiftUI, SwiftData, iOS 17+               |
+| Backend      | Node.js 24+, Express, TypeScript                 |
+| Database     | Supabase (PostgreSQL)                            |
+| Auth         | Supabase Auth (Admin API + session tokens)       |
+| AI           | Azure OpenAI (GPT-4o for chat/vision/scheduling) |
+| Speech       | Azure OpenAI (gpt-4o-transcribe-diarize)         |
+| File Parsing | pdf-parse, mammoth (DOCX), GPT-4o vision (OCR)   |
+| Validation   | Zod                                              |
+| Deployment   | Azure Web App via GitHub Actions                 |
+
+---
+
+## Project Structure
+
+```
+MoreTime/
+├── backend/
+│   ├── src/
+│   │   ├── index.ts                  # Express app entry point
+│   │   ├── routes/
+│   │   │   ├── auth.ts               # Register, login, refresh, logout, profile
+│   │   │   ├── courses.ts            # CRUD for courses
+│   │   │   ├── tasks.ts              # CRUD for tasks
+│   │   │   ├── schedule.ts           # Schedule blocks + AI generation
+│   │   │   ├── chat.ts               # AI chat messages
+│   │   │   ├── files.ts              # File upload + task extraction
+│   │   │   └── voice.ts              # Audio transcription + voice chat
+│   │   ├── services/
+│   │   │   ├── ai.ts                 # Azure OpenAI wrappers (chat, extract, schedule)
+│   │   │   ├── chat.ts               # Chat context builder + action parser
+│   │   │   ├── scheduling.ts         # Schedule generation + validation
+│   │   │   ├── fileParser.ts         # PDF, DOCX, TXT, image parsing
+│   │   │   └── voice.ts              # Audio transcription via Azure
+│   │   ├── middleware/
+│   │   │   ├── auth.ts               # Bearer token auth guard (Supabase)
+│   │   │   ├── validate.ts           # Zod request validation
+│   │   │   └── errorHandler.ts       # Global error handler
+│   │   └── utils/
+│   │       ├── supabase.ts           # Supabase client singleton
+│   │       ├── azure-openai.ts       # OpenAI client singleton
+│   │       ├── env.ts                # Environment variable validation
+│   │       ├── errors.ts             # Custom error classes
+│   │       └── transform.ts          # snake_case ↔ camelCase
+│   ├── supabase-migration.sql        # Database schema + RLS policies
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── ios/
+│   └── MoreTime/
+│       ├── MoreTimeApp.swift          # App entry point
+│       ├── Views/
+│       │   ├── RootView.swift         # Auth routing (login vs main)
+│       │   ├── LoginView.swift        # Sign in + registration
+│       │   ├── MainTabView.swift      # Tab bar (Calendar, Tasks, Chat, Settings)
+│       │   ├── CalendarView.swift     # Monthly calendar + day detail
+│       │   ├── TaskListView.swift     # Task list with grouping + sorting
+│       │   ├── TaskDetailView.swift   # Task edit/create form
+│       │   ├── ChatView.swift         # AI chat interface
+│       │   ├── VoiceInputView.swift   # Voice recording UI
+│       │   ├── SettingsView.swift     # Settings + locked blocks
+│       │   ├── ScheduleGenerateView.swift  # Schedule generation UI
+│       │   ├── FileUploadView.swift   # File upload + task extraction
+│       │   ├── CourseManagementView.swift   # Course CRUD
+│       │   └── DebugLogView.swift     # Error log viewer
+│       ├── Stores/
+│       │   ├── AuthStore.swift        # Auth state management
+│       │   ├── TaskStore.swift        # Tasks + courses state
+│       │   ├── ScheduleStore.swift    # Schedule blocks state
+│       │   └── ChatStore.swift        # Chat messages state
+│       ├── Services/
+│       │   ├── APIClient.swift        # HTTP client with token refresh
+│       │   ├── KeychainHelper.swift   # Secure token storage
+│       │   ├── AudioRecorder.swift    # AVAudioRecorder wrapper
+│       │   └── ErrorLogger.swift      # Error capture + toast banner
+│       ├── Models/
+│       │   ├── APIModels.swift        # Codable DTOs for all endpoints
+│       │   └── CachedModels.swift     # SwiftData models (local cache)
+│       └── Components/
+│           ├── ColorExtension.swift   # Color(hex:) initializer
+│           └── ErrorBanner.swift      # Global error overlay modifier
+│
+├── .github/workflows/
+│   └── main_moretime.yml              # CI/CD pipeline
+├── .env                               # Environment variables (not committed)
+└── .gitignore
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js** 24+ and npm
+- **Xcode** 15+ with iOS 17+ SDK
+- A **Supabase** project ([supabase.com](https://supabase.com))
+- An **Azure OpenAI** resource with a GPT-4o deployment
+
+### Supabase Setup
+
+1. Create a new project at [supabase.com/dashboard](https://supabase.com/dashboard)
+
+2. Open the **SQL Editor** and run the migration file to create all tables, indexes, triggers, and RLS policies:
+
+```sql
+-- Copy and paste the contents of backend/supabase-migration.sql
+```
+
+This creates: `profiles`, `courses`, `tasks`, `schedule_blocks`, `file_uploads`, `chat_messages`
+
+It also creates a trigger (`on_auth_user_created`) that automatically inserts a `profiles` row whenever a new user signs up via Supabase Auth.
+
+3. Go to **Project Settings → API** and copy:
+   - **Project URL** → `SUPABASE_URL`
+   - **anon public** key → `SUPABASE_ANON_KEY`
+   - **service_role secret** key → `SUPABASE_SERVICE_ROLE_KEY`
+
+### Backend Setup
+
+```bash
+cd backend
+cp ../.env.example .env   # or create .env manually (see Environment Variables below)
+npm install
+npm run dev               # starts dev server with hot reload on port 3000
+```
+
+The dev server runs at `http://localhost:3000`. Test with:
+
+```bash
+curl http://localhost:3000/health
+```
+
+### iOS Setup
+
+1. Open `ios/MoreTime.xcodeproj` in Xcode
+2. The iOS app connects to `http://localhost:3000` in DEBUG mode and to the Azure production URL in release builds (configured in `APIClient.swift`)
+3. Build and run on the iOS Simulator (or a physical device)
+
+#### Dev Bypass (Optional)
+
+For development without authentication, set `DEV_BYPASS_AUTH=true` in your backend `.env`. The iOS app has a corresponding `#if DEBUG` block in `AuthStore.swift` that auto-authenticates with a dev user. Remove or disable this block when testing real auth flows.
+
+---
+
+## Environment Variables
+
+Create a `.env` file in the project root (used by the backend):
+
+| Variable                       | Required | Description                                                    |
+| ------------------------------ | -------- | -------------------------------------------------------------- |
+| `SUPABASE_URL`                 | Yes      | Your Supabase project URL (e.g., `https://xxx.supabase.co`)    |
+| `SUPABASE_ANON_KEY`            | Yes      | Supabase anon/public key                                       |
+| `SUPABASE_SERVICE_ROLE_KEY`    | Yes      | Supabase service role key (secret — used for admin operations) |
+| `AZURE_OPENAI_ENDPOINT`        | Yes      | Azure OpenAI resource endpoint                                 |
+| `AZURE_OPENAI_API_KEY`         | Yes      | Azure OpenAI API key                                           |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | No       | Chat model deployment name (default: `gpt-4o`)                 |
+| `AZURE_SPEECH_KEY`             | No       | Azure Speech key (for voice features)                          |
+| `AZURE_SPEECH_REGION`          | No       | Azure Speech region (default: `eastus`)                        |
+| `PORT`                         | No       | Server port (default: `3000`)                                  |
+| `DEV_BYPASS_AUTH`              | No       | Set to `true` to skip auth in development                      |
+
+---
+
+## API Reference
+
+All endpoints (except auth and health) require a `Bearer <token>` header. Tokens are Supabase session access tokens obtained from login/register.
+
+### Auth — `/auth`
+
+| Method  | Path        | Body                                   | Response                              |
+| ------- | ----------- | -------------------------------------- | ------------------------------------- |
+| `POST`  | `/register` | `{ email, name, password, timezone? }` | `{ user, accessToken, refreshToken }` |
+| `POST`  | `/login`    | `{ email, password }`                  | `{ user, accessToken, refreshToken }` |
+| `POST`  | `/refresh`  | `{ refreshToken }`                     | `{ accessToken, refreshToken }`       |
+| `POST`  | `/logout`   | —                                      | `{ message }`                         |
+| `GET`   | `/me`       | —                                      | `UserProfile`                         |
+| `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile`                         |
+
+### Courses — `/courses`
+
+| Method   | Path   | Body                           | Response                         |
+| -------- | ------ | ------------------------------ | -------------------------------- |
+| `GET`    | `/`    | —                              | `[Course]` (includes task count) |
+| `GET`    | `/:id` | —                              | `Course` (includes tasks)        |
+| `POST`   | `/`    | `{ name, color?, metadata? }`  | `Course`                         |
+| `PATCH`  | `/:id` | `{ name?, color?, metadata? }` | `Course`                         |
+| `DELETE` | `/:id` | —                              | `204`                            |
+
+### Tasks — `/tasks`
+
+| Method   | Path     | Body / Query                                                                        | Response                                       |
+| -------- | -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `GET`    | `/`      | Query: `courseId?`, `status?`, `sortBy?`, `sortOrder?`                              | `[TaskItem]`                                   |
+| `GET`    | `/:id`   | —                                                                                   | `TaskItem` (includes course + schedule blocks) |
+| `POST`   | `/`      | `{ courseId?, title, description?, dueDate?, priority?, estimatedHours?, status? }` | `TaskItem`                                     |
+| `PATCH`  | `/:id`   | Same fields, all optional                                                           | `TaskItem`                                     |
+| `DELETE` | `/:id`   | —                                                                                   | `204`                                          |
+| `DELETE` | `/clear` | —                                                                                   | `{ removed }`                                  |
+
+### Schedule — `/schedule`
+
+| Method   | Path        | Body / Query                                               | Response                                             |
+| -------- | ----------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| `GET`    | `/`         | Query: `startDate`, `endDate` (YYYY-MM-DD)                 | `[ScheduleBlock]`                                    |
+| `POST`   | `/`         | `{ taskId?, date, startTime, endTime, isLocked?, label? }` | `ScheduleBlock`                                      |
+| `PATCH`  | `/:id`      | Same fields, all optional                                  | `ScheduleBlock`                                      |
+| `DELETE` | `/:id`      | —                                                          | `204`                                                |
+| `DELETE` | `/clear`    | —                                                          | `{ removed }` (non-locked only)                      |
+| `POST`   | `/generate` | —                                                          | `{ blocksCreated, blocksRemoved, blocks, warnings }` |
+
+### Chat — `/chat` (rate limited: 20/min)
+
+| Method | Path       | Body                      | Response                                               |
+| ------ | ---------- | ------------------------- | ------------------------------------------------------ |
+| `POST` | `/message` | `{ message, sessionId? }` | `{ sessionId, response, action?, scheduleGenerated? }` |
+
+The AI may return an `action` of type `task_created` with the created task data. When this happens, the schedule is automatically regenerated in the background.
+
+### Files — `/files`
+
+| Method | Path                 | Body                                     | Response                                  |
+| ------ | -------------------- | ---------------------------------------- | ----------------------------------------- |
+| `POST` | `/upload`            | Multipart: `files` + optional `courseId` | `[FileUploadResponse]`                    |
+| `GET`  | `/`                  | —                                        | `[FileUploadResponse]`                    |
+| `GET`  | `/:id`               | —                                        | `FileUploadResponse`                      |
+| `POST` | `/:id/extract-tasks` | `{ dueDate? }`                           | `{ extractedCount, tasks, documentType }` |
+
+Uploaded files are parsed asynchronously. Poll `GET /:id` until `parseStatus` is `completed`. The extract endpoint auto-detects whether the document is a syllabus (extracts all assignments) or a single assignment (breaks it into subtasks).
+
+### Voice — `/voice` (rate limited: 20/min)
+
+| Method | Path          | Body                                      | Response                                 |
+| ------ | ------------- | ----------------------------------------- | ---------------------------------------- |
+| `POST` | `/transcribe` | Multipart: `audio`                        | `{ text }`                               |
+| `POST` | `/chat`       | Multipart: `audio` + optional `sessionId` | `{ transcription, sessionId, response }` |
+
+### Health
+
+| Method | Path      | Response                      |
+| ------ | --------- | ----------------------------- |
+| `GET`  | `/health` | `{ status: "ok", timestamp }` |
+
+---
+
+## Database Schema
+
+All tables use UUIDs as primary keys. Row Level Security (RLS) is enabled on every table — users can only access their own data.
+
+| Table             | Key Columns                                                                                | Notes                                           |
+| ----------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                 | Auto-created via trigger on auth signup         |
+| `courses`         | `id`, `user_id`, `name`, `color`                                                           |                                                 |
+| `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status` | `course_id` set null on course delete           |
+| `schedule_blocks` | `id`, `user_id`, `task_id`, `date`, `start_time`, `end_time`, `is_locked`, `label`         | Locked blocks are preserved during regeneration |
+| `file_uploads`    | `id`, `user_id`, `course_id`, `original_name`, `parsed_content`, `parse_status`            | Status: pending → parsing → completed/failed    |
+| `chat_messages`   | `id`, `user_id`, `role`, `content`, `session_id`, `timestamp`                              | Roles: user, assistant                          |
+
+See `backend/supabase-migration.sql` for the complete schema, indexes, trigger function, and RLS policies.
+
+---
+
+## Deployment
+
+The backend deploys to **Azure Web App** via GitHub Actions on every push to `main` that modifies `backend/**`.
+
+### CI/CD Pipeline (`.github/workflows/main_moretime.yml`)
+
+1. Checkout code
+2. Set up Node.js 24.x
+3. `npm install` → `npm run build` → `npm prune --omit=dev`
+4. Remove `.env` files (secrets are configured in Azure App Settings)
+5. Upload build artifact
+6. Deploy to Azure Web App `moretime` (Production slot) using OIDC auth
+
+### Production URLs
+
+- **API**: `https://moretime-gdbwhjgfdxeyhtfw.canadacentral-01.azurewebsites.net`
+- **Health check**: `GET /health`
+
+Environment variables in production are set via Azure App Settings, not `.env` files.

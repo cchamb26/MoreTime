@@ -7,6 +7,7 @@ struct MoreTimeApp: App {
     @State private var taskStore = TaskStore()
     @State private var scheduleStore = ScheduleStore()
     @State private var chatStore = ChatStore()
+    @State private var semesterStore = SemesterStore()
 
     static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -28,6 +29,7 @@ struct MoreTimeApp: App {
                 .environment(taskStore)
                 .environment(scheduleStore)
                 .environment(chatStore)
+                .environment(semesterStore)
         }
         .modelContainer(Self.sharedModelContainer)
     }

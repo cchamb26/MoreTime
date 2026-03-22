@@ -19,9 +19,13 @@ struct MainTabView: View {
                 .tabItem { Label("Chat", systemImage: "message") }
                 .tag(2)
 
+            SemesterHeatMapView()
+                .tabItem { Label("Semester", systemImage: "chart.bar.xaxis") }
+                .tag(3)
+
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }
-                .tag(3)
+                .tag(4)
         }
         .tint(.primary)
         .task {

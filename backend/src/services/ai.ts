@@ -189,6 +189,70 @@ export async function chatCompletion(
   return response.choices[0]?.message?.content ?? 'I was unable to generate a response.';
 }
 
+// MARK: - Semester Plan
+
+export interface SemesterEvent {
+  courseName: string;
+  title: string;
+  dueDate: string;
+  estimatedHours: number;
+  type: string;
+}
+
+export async function generateSemesterPlan(
+  parsedSyllabi: { courseName: string; content: string }[],
+  semesterStart: string,
+  semesterEnd: string,
+): Promise<SemesterEvent[]> {
+  const client = getOpenAIClient();
+  const currentYear = new Date().getFullYear();
+
+  const syllabiText = parsedSyllabi
+    .map((s, i) => `--- COURSE ${i + 1}: ${s.courseName} ---\n${s.content.slice(0, 12000)}`)
+    .join('\n\n');
+
+  const systemPrompt = `You are an academic planner. You will receive the parsed text of ${parsedSyllabi.length} course syllabi.
+Your job is to extract EVERY graded event (assignments, exams, quizzes, projects, presentations, papers, lab reports) from all syllabi and return them as structured JSON.
+
+Semester runs from ${semesterStart} to ${semesterEnd}. Use the ${currentYear}–${currentYear + 1} academic year for dates.
+
+For each event, estimate hours required based on event type:
+- Quiz: 1–2 hours
+- Homework/Assignment: 2–4 hours
+- Project (milestone): 4–8 hours
+- Exam (midterm/final): 6–10 hours (include study time)
+- Paper: 5–15 hours depending on length cues in the syllabus
+- Lab report: 2–4 hours
+- Presentation: 3–6 hours
+
+If a date cannot be determined with confidence, omit the event. Only include events with concrete due dates.
+
+Return JSON: { "events": [ { "courseName": "...", "title": "...", "dueDate": "YYYY-MM-DD", "estimatedHours": N, "type": "quiz|homework|project|exam|paper|lab|presentation|other" } ] }
+Output ONLY valid JSON — no markdown fencing, no extra text.`;
+
+  const response = await client.chat.completions.create({
+    model: getDeploymentName(),
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Extract all graded events from these syllabi:\n\n${syllabiText}` },
+    ],
+    max_completion_tokens: 8000,
+    response_format: { type: 'json_object' },
+  });
+
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    const items: SemesterEvent[] = Array.isArray(parsed) ? parsed : parsed.events || parsed.tasks || [];
+    return items.filter((e) => e.title && e.dueDate && e.estimatedHours);
+  } catch {
+    console.error('Failed to parse semester plan AI response');
+    return [];
+  }
+}
+
 export interface ScheduleBlockInput {
   taskId: string;
   date: string;
