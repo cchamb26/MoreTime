@@ -32,10 +32,18 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 - Sort by due date, priority, or creation date
 - Swipe-to-complete and swipe-to-delete gestures
 - Mark tasks as pending, in-progress, or completed
+- Optional **learning debrief** after you mark a task complete (confidence, hardest part, optional “revisit” note) — saved to your profile for Chat context; see **Learning reflections** below
+
+### Learning reflections
+
+- Short post-completion reflection (from **Tasks** swipe-to-complete or **Task detail** when moving to completed); **Skip** saves nothing; **Save** appends to profile **`preferences.learningDebriefs`** (JSON array, last 25 entries)
+- **Settings → Past reflections**: browse saved debriefs, pull to refresh from the server, or **Clear all** to remove them from your profile
+- The chat backend injects recent reflections into the assistant **system prompt** so replies can personalize study advice (no separate ML model or agent)
 
 ### AI Chat Assistant
 
 - Context-aware chat that knows your tasks, schedule, and courses
+- Uses **recent learning reflections** from your profile when present (see **Learning reflections** above)
 - **Paperclip attachments:** upload assignment PDFs/DOCX/images from chat; after parsing, the assistant uses the document text to schedule tasks (same upload + parse pipeline as **Files**)
 - Automatically detects and creates tasks from natural conversation (e.g., "I have a CS310 paper due Friday")
 - Auto-generates schedule blocks whenever a task is created via chat
@@ -68,8 +76,8 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 ### Calendar View
 
 - Monthly calendar grid with color-coded indicators: **circles** for schedule blocks, **small squares** for tasks that have a **due date** but no matching block (deduped when a block already links the same task)
+- Day detail separates **Scheduled** (time blocks from `/schedule`: classes and planned study sessions) from **Due** (tasks from your **Tasks** tab due that day without a matching block). If your task list is empty, you may still see **Scheduled** rows from classes or generated schedule — those are not task-list items. Tap a task under **Due** to open its detail
 - Toolbar **Clear** menu: **Clear all schedule** (removes every block, including locked class times) and **Clear current day** (removes all blocks on the selected date and deletes pending/in-progress tasks due that local day)
-- Day detail has **Scheduled** (blocks from `/schedule`) and **Due** (tasks due that day); tap a due task to open its detail
 - **Clear Schedule** (toolbar): deletes **non-locked** blocks on the server, refetches the calendar, then updates the UI. Locked class blocks stay. Tasks with due dates can still appear under **Due** until you edit or remove those tasks
 - Navigate between months, jump to today
 - Locked blocks (recurring classes) shown with lock icon
@@ -121,7 +129,7 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 - **Express** routes handle HTTP requests with Zod validation middleware
 - **Supabase** for authentication (Admin API for user creation, session tokens for auth) and Postgres database
 - **Azure OpenAI** for all AI features: chat completions, document parsing, schedule generation, image OCR, and audio transcription
-- **Service layer** separates business logic (chat context building, schedule optimization, file parsing) from route handlers
+- **Service layer** separates business logic (chat context building, schedule optimization, file parsing, learning-debrief formatting for chat) from route handlers
 - **snake_case ↔ camelCase** transform layer between Supabase (snake) and API responses (camel)
 - Rate limiting: 200 req/15 min global; stricter limiter (20 req/min) on `/chat`, `/files`, and `/voice` (AI-heavy routes)
 
@@ -131,7 +139,7 @@ AI-powered study schedule optimizer for students. MoreTime helps you manage cour
 - **APIClient** singleton handles all networking with automatic token refresh on 401 responses
 - **KeychainHelper** stores auth tokens securely
 - **ErrorLogger** captures and surfaces API errors via toast banners and a debug log
-- **Profile preferences** (`PATCH /auth/me`): merged client-side; used for study-time prefs and persisted **semester plan** (`semesterPlan` key)
+- **Profile preferences** (`PATCH /auth/me`): merged client-side; used for study-time prefs, persisted **semester plan** (`semesterPlan` key), and **learning debriefs** (`learningDebriefs` array)
 - Tab bar: **Calendar**, **Tasks**, **Chat**, **Semester**, **Settings** — switching to Calendar refreshes tasks and loaded schedule range
 - Targets iOS 17+ using `@Observable` (not Combine); tab bar uses iOS 17–compatible `.tabItem` / `.tag` APIs
 
@@ -184,7 +192,8 @@ MoreTime/
 │   │       ├── azure-openai.ts       # OpenAI client singleton
 │   │       ├── env.ts                # Environment variable validation
 │   │       ├── errors.ts             # Custom error classes
-│   │       └── transform.ts          # snake_case ↔ camelCase
+│   │       ├── transform.ts          # snake_case ↔ camelCase
+│   │       └── learningDebriefs.ts   # Format stored reflections for chat system prompt
 │   ├── tests/                        # Vitest (validation, scheduling)
 │   ├── supabase-migration.sql        # Database schema + RLS policies
 │   ├── package.json
@@ -204,6 +213,8 @@ MoreTime/
 │       │   ├── ChatView.swift         # AI chat interface
 │       │   ├── VoiceInputView.swift   # Voice recording UI
 │       │   ├── SettingsView.swift     # Settings, study prefs, courses & class schedule sheet
+│       │   ├── LearningDebriefSheet.swift  # Post-completion reflection form
+│       │   ├── PastReflectionsView.swift   # Settings: list of saved debriefs
 │       │   ├── ScheduleGenerateView.swift  # Schedule generation UI
 │       │   ├── FileUploadView.swift   # File upload + task extraction
 │       │   └── CourseManagementView.swift   # Course CRUD
@@ -319,7 +330,7 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 | `POST`  | `/refresh`  | `{ refreshToken }`                     | `{ accessToken, refreshToken }`                                                                                                                                   |
 | `POST`  | `/logout`   | —                                      | `{ message }`                                                                                                                                                     |
 | `GET`   | `/me`       | —                                      | `UserProfile`                                                                                                                                                     |
-| `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile` (full `preferences` JSON is replaced with the merged object from the client; optional `semesterPlan` string holds the saved semester heat-map JSON) |
+| `PATCH` | `/me`       | `{ name?, timezone?, preferences? }`   | `UserProfile` (full `preferences` JSON is replaced with the merged object from the client; optional `semesterPlan` string for the semester heat map; optional `learningDebriefs` array of reflection objects) |
 
 ### Courses — `/courses`
 
@@ -364,6 +375,8 @@ All endpoints (except auth and health) require a `Bearer <token>` header. Tokens
 
 **Attachments:** Upload files with `POST /files/upload`, poll `GET /files/:id` until `parseStatus` is `completed`, then send their IDs in `fileIds`. The server injects parsed text into the model for that turn only (not stored in full in chat history). Chat messages store a short `[Attachments: …]` line instead.
 
+**Context:** The assistant system prompt includes your pending tasks, today’s blocks, courses, and **recent learning reflections** from `profiles.preferences.learningDebriefs` when present (formatted in `backend/src/utils/learningDebriefs.ts`).
+
 The AI may return an `action` of type `task_created` with the created task data. When this happens, the schedule is automatically regenerated in the background.
 
 ### Files — `/files` (rate limited: 20/min with other AI routes)
@@ -400,7 +413,7 @@ All tables use UUIDs as primary keys. Row Level Security (RLS) is enabled on eve
 
 | Table             | Key Columns                                                                                     | Notes                                                                                                                                   |
 | ----------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                      | Auto-created via trigger on auth signup; may include `semesterPlan` (string) for the saved heat map                                     |
+| `profiles`        | `id` (FK → auth.users), `email`, `name`, `timezone`, `preferences` (JSONB)                      | Auto-created via trigger on auth signup; may include `semesterPlan` (string) for the saved heat map and `learningDebriefs` (array) for post-task reflections used in chat |
 | `courses`         | `id`, `user_id`, `name`, `color`                                                                |                                                                                                                                         |
 | `tasks`           | `id`, `user_id`, `course_id`, `title`, `due_date`, `priority`, `estimated_hours`, `status`      | `course_id` set null on course delete                                                                                                   |
 | `schedule_blocks` | `id`, `user_id`, `task_id`, `course_id`, `date`, `start_time`, `end_time`, `is_locked`, `label` | Optional `course_id` → `courses` for class blocks; API embeds `classCourse` when FK `schedule_blocks_course_id_fkey` exists in Supabase |
